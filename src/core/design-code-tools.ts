@@ -1465,6 +1465,154 @@ function buildParityInstruction(
 	].join("\n");
 }
 
+interface RunDesignParityCheckOptions {
+	api: FigmaAPI;
+	fileKey: string;
+	nodeId: string;
+	codeSpec: CodeSpec;
+	canonicalSource?: "design" | "code";
+	enrich?: boolean;
+}
+
+export async function runDesignParityCheck({
+	api,
+	fileKey,
+	nodeId,
+	codeSpec,
+	canonicalSource = "design",
+	enrich = true,
+}: RunDesignParityCheckOptions): Promise<ParityCheckResult> {
+	const nodesResponse = await api.getNodes(fileKey, [nodeId], { depth: 2 });
+	const nodeData = nodesResponse?.nodes?.[nodeId];
+	if (!nodeData?.document) {
+		throw new Error(`Node ${nodeId} not found in file ${fileKey}`);
+	}
+	const node = nodeData.document;
+
+	const nodeForVisual = resolveVisualNode(node);
+	if (nodeForVisual !== node) {
+		logger.info({ defaultVariant: nodeForVisual.name, type: node.type }, "Using default variant for visual comparison");
+	}
+
+	let componentMeta: any = null;
+	let allComponentsMeta: any[] | null = null;
+	try {
+		const componentsResponse = await api.getComponents(fileKey);
+		if (componentsResponse?.meta?.components) {
+			allComponentsMeta = componentsResponse.meta.components;
+			componentMeta = componentsResponse.meta.components.find((c: any) => c.node_id === nodeId);
+		}
+	} catch {
+		logger.warn("Could not fetch component metadata");
+	}
+
+	let setInfo = { setName: null as string | null, setNodeId: null as string | null, propertyDefinitions: {} as Record<string, any> };
+	if (node.type === "COMPONENT_SET") {
+		setInfo = {
+			setName: node.name,
+			setNodeId: nodeId,
+			propertyDefinitions: node.componentPropertyDefinitions || {},
+		};
+	} else if (node.type === "COMPONENT" && isVariantName(node.name)) {
+		try {
+			setInfo = await resolveComponentSetInfo(api, fileKey, nodeId, componentMeta, allComponentsMeta);
+			if (setInfo.setName) {
+				logger.info({ setName: setInfo.setName, setNodeId: setInfo.setNodeId }, "Resolved parent component set");
+			}
+		} catch {
+			logger.warn("Could not resolve parent component set");
+		}
+	}
+
+	const nodeForAPI = Object.keys(setInfo.propertyDefinitions).length > 0
+		? { ...node, componentPropertyDefinitions: setInfo.propertyDefinitions }
+		: node;
+
+	let enrichedData: EnrichedComponent | null = null;
+	if (enrich) {
+		try {
+			const enrichmentOptions: EnrichmentOptions = {
+				enrich: true,
+				include_usage: true,
+			};
+			enrichedData = await enrichmentService.enrichComponent(
+				node,
+				fileKey,
+				enrichmentOptions,
+			);
+		} catch {
+			logger.warn("Enrichment failed, proceeding without token data");
+		}
+	}
+
+	const discrepancies: ParityDiscrepancy[] = [];
+	compareVisual(nodeForVisual, codeSpec, discrepancies);
+	compareSpacing(nodeForVisual, codeSpec, discrepancies);
+	compareTypography(nodeForVisual, codeSpec, discrepancies);
+	compareTokens(enrichedData, codeSpec, discrepancies);
+	compareComponentAPI(nodeForAPI, codeSpec, discrepancies);
+	compareAccessibility(node, codeSpec, discrepancies);
+	compareNaming(node, codeSpec, discrepancies);
+	compareMetadata(node, componentMeta, codeSpec, discrepancies);
+
+	const severityOrder: Record<DiscrepancySeverity, number> = {
+		critical: 0,
+		major: 1,
+		minor: 2,
+		info: 3,
+	};
+	discrepancies.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+	const counts = { critical: 0, major: 0, minor: 0, info: 0 };
+	const categoryMap: Partial<Record<ParityCategory, number>> = {};
+	for (const d of discrepancies) {
+		counts[d.severity]++;
+		categoryMap[d.category] = (categoryMap[d.category] || 0) + 1;
+	}
+
+	const parityScore = calculateParityScore(counts.critical, counts.major, counts.minor, counts.info);
+	const actionItems = generateActionItems(discrepancies, nodeId, canonicalSource, codeSpec.filePath);
+	const resolvedName = resolveComponentName(
+		node,
+		setInfo.setName,
+		codeSpec.metadata?.name || codeSpec.filePath?.split("/").pop()?.replace(/\.\w+$/, ""),
+	);
+
+	return {
+		summary: {
+			totalDiscrepancies: discrepancies.length,
+			parityScore,
+			byCritical: counts.critical,
+			byMajor: counts.major,
+			byMinor: counts.minor,
+			byInfo: counts.info,
+			categories: categoryMap,
+		},
+		discrepancies,
+		actionItems,
+		ai_instruction: buildParityInstruction(resolvedName, parityScore, counts, canonicalSource, discrepancies.length),
+		designData: {
+			name: node.name,
+			resolvedName,
+			type: node.type,
+			isComponentSet: node.type === "COMPONENT_SET",
+			defaultVariantName: node.type === "COMPONENT_SET" ? nodeForVisual.name : undefined,
+			componentSetName: setInfo.setName,
+			componentSetNodeId: setInfo.setNodeId,
+			fills: nodeForVisual.fills,
+			strokes: nodeForVisual.strokes,
+			cornerRadius: nodeForVisual.cornerRadius,
+			opacity: nodeForVisual.opacity,
+			spacing: extractSpacingProperties(nodeForVisual),
+			componentProperties: nodeForAPI.componentPropertyDefinitions
+				? Object.keys(nodeForAPI.componentPropertyDefinitions)
+				: [],
+			tokenCoverage: enrichedData?.token_coverage,
+		},
+		codeData: codeSpec,
+	};
+}
+
 // ============================================================================
 // Documentation Section Generators
 // ============================================================================
@@ -2257,7 +2405,7 @@ export function toCompanyDocsEntry(
 // Zod Schemas
 // ============================================================================
 
-const codeSpecSchema = z.object({
+export const codeSpecSchema = z.object({
 	filePath: z.string().optional().describe("Path to the component source file"),
 	visual: z.object({
 		backgroundColor: z.string().optional(),
@@ -2449,153 +2597,14 @@ export function registerDesignCodeTools(
 
 				const api = await getFigmaAPI();
 
-				// Fetch component node
-				const nodesResponse = await api.getNodes(fileKey, [nodeId], { depth: 2 });
-				const nodeData = nodesResponse?.nodes?.[nodeId];
-				if (!nodeData?.document) {
-					throw new Error(`Node ${nodeId} not found in file ${fileKey}`);
-				}
-				const node = nodeData.document;
-
-				// Resolve the node to use for visual/spacing/typography comparisons.
-				// COMPONENT_SET frames have container styling (purple annotation stroke, etc.)
-				// that are NOT actual design specs — the real properties live on the variants.
-				const nodeForVisual = resolveVisualNode(node);
-				if (nodeForVisual !== node) {
-					logger.info({ defaultVariant: nodeForVisual.name, type: node.type }, "Using default variant for visual comparison");
-				}
-
-				// Fetch component metadata for descriptions
-				let componentMeta: any = null;
-				let allComponentsMeta: any[] | null = null;
-				try {
-					const componentsResponse = await api.getComponents(fileKey);
-					if (componentsResponse?.meta?.components) {
-						allComponentsMeta = componentsResponse.meta.components;
-						componentMeta = allComponentsMeta!.find(
-							(c: any) => c.node_id === nodeId,
-						);
-					}
-				} catch {
-					logger.warn("Could not fetch component metadata");
-				}
-
-				// Resolve COMPONENT_SET info (property definitions, set name)
-				let setInfo = { setName: null as string | null, setNodeId: null as string | null, propertyDefinitions: {} as Record<string, any> };
-				if (node.type === "COMPONENT_SET") {
-					// We already have the set — read property definitions directly
-					setInfo = {
-						setName: node.name,
-						setNodeId: nodeId,
-						propertyDefinitions: node.componentPropertyDefinitions || {},
-					};
-				} else if (node.type === "COMPONENT" && isVariantName(node.name)) {
-					try {
-						setInfo = await resolveComponentSetInfo(api, fileKey, nodeId, componentMeta, allComponentsMeta);
-						if (setInfo.setName) {
-							logger.info({ setName: setInfo.setName, setNodeId: setInfo.setNodeId }, "Resolved parent component set");
-						}
-					} catch {
-						logger.warn("Could not resolve parent component set");
-					}
-				}
-
-				// Build a merged node for componentAPI comparison (use set's property definitions)
-				const nodeForAPI = Object.keys(setInfo.propertyDefinitions).length > 0
-					? { ...node, componentPropertyDefinitions: setInfo.propertyDefinitions }
-					: node;
-
-				// Enrichment for token analysis
-				let enrichedData: EnrichedComponent | null = null;
-				if (enrich) {
-					try {
-						const enrichmentOptions: EnrichmentOptions = {
-							enrich: true,
-							include_usage: true,
-						};
-						enrichedData = await enrichmentService.enrichComponent(
-							node,
-							fileKey,
-							enrichmentOptions,
-						);
-					} catch {
-						logger.warn("Enrichment failed, proceeding without token data");
-					}
-				}
-
-				// Run all comparators (use nodeForVisual for design properties, nodeForAPI for component API)
-				const discrepancies: ParityDiscrepancy[] = [];
-				compareVisual(nodeForVisual, codeSpec, discrepancies);
-				compareSpacing(nodeForVisual, codeSpec, discrepancies);
-				compareTypography(nodeForVisual, codeSpec, discrepancies);
-				compareTokens(enrichedData, codeSpec, discrepancies);
-				compareComponentAPI(nodeForAPI, codeSpec, discrepancies);
-				compareAccessibility(node, codeSpec, discrepancies);
-				compareNaming(node, codeSpec, discrepancies);
-				compareMetadata(node, componentMeta, codeSpec, discrepancies);
-
-				// Sort by severity
-				const severityOrder: Record<DiscrepancySeverity, number> = {
-					critical: 0,
-					major: 1,
-					minor: 2,
-					info: 3,
-				};
-				discrepancies.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-
-				// Calculate scores
-				const counts = { critical: 0, major: 0, minor: 0, info: 0 };
-				const categoryMap: Partial<Record<ParityCategory, number>> = {};
-				for (const d of discrepancies) {
-					counts[d.severity]++;
-					categoryMap[d.category] = (categoryMap[d.category] || 0) + 1;
-				}
-
-				const parityScore = calculateParityScore(counts.critical, counts.major, counts.minor, counts.info);
-
-				// Generate action items
-				const actionItems = generateActionItems(
-					discrepancies,
+				const result = await runDesignParityCheck({
+					api,
+					fileKey,
 					nodeId,
+					codeSpec,
 					canonicalSource,
-					codeSpec.filePath,
-				);
-
-				const resolvedName = resolveComponentName(node, setInfo.setName, codeSpec.metadata?.name || codeSpec.filePath?.split("/").pop()?.replace(/\.\w+$/, ""));
-
-				const result: ParityCheckResult = {
-					summary: {
-						totalDiscrepancies: discrepancies.length,
-						parityScore,
-						byCritical: counts.critical,
-						byMajor: counts.major,
-						byMinor: counts.minor,
-						byInfo: counts.info,
-						categories: categoryMap,
-					},
-					discrepancies,
-					actionItems,
-					ai_instruction: buildParityInstruction(resolvedName, parityScore, counts, canonicalSource, discrepancies.length),
-					designData: {
-						name: node.name,
-						resolvedName,
-						type: node.type,
-						isComponentSet: node.type === "COMPONENT_SET",
-						defaultVariantName: node.type === "COMPONENT_SET" ? nodeForVisual.name : undefined,
-						componentSetName: setInfo.setName,
-						componentSetNodeId: setInfo.setNodeId,
-						fills: nodeForVisual.fills,
-						strokes: nodeForVisual.strokes,
-						cornerRadius: nodeForVisual.cornerRadius,
-						opacity: nodeForVisual.opacity,
-						spacing: extractSpacingProperties(nodeForVisual),
-						componentProperties: nodeForAPI.componentPropertyDefinitions
-							? Object.keys(nodeForAPI.componentPropertyDefinitions)
-							: [],
-						tokenCoverage: enrichedData?.token_coverage,
-					},
-					codeData: codeSpec,
-				};
+					enrich,
+				});
 
 				return {
 					content: [{ type: "text", text: JSON.stringify(result) }],

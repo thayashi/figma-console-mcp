@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { extractFigmaUrlInfo, formatVariables } from "../../core/figma-api.js";
 import { searchComponents as searchManifestComponents, DesignSystemManifestCache, createEmptyManifest, figmaColorToHex } from "../../core/design-system-manifest.js";
+import type { CodeSpec } from "../../core/types/design-code.js";
 import type { ToolDefinition } from "../types.js";
-import { figmaRGBAToHex, normalizeColor, numericClose, resolveVisualNode } from "../../core/design-code-tools.js";
+import { codeSpecSchema, runDesignParityCheck } from "../../core/design-code-tools.js";
 
 const variablesInputSchema = z.object({
 	fileUrl: z.string().url().optional(),
@@ -22,37 +23,9 @@ const searchComponentsInputSchema = z.object({
 const parityInputSchema = z.object({
 	fileUrl: z.string().url().optional(),
 	nodeId: z.string(),
-	codeSpec: z.object({
-		filePath: z.string().optional(),
-		visual: z.object({
-			backgroundColor: z.string().optional(),
-			borderColor: z.string().optional(),
-			borderRadius: z.number().optional(),
-			borderWidth: z.number().optional(),
-			opacity: z.number().optional(),
-		}).optional(),
-		spacing: z.object({
-			paddingTop: z.number().optional(),
-			paddingRight: z.number().optional(),
-			paddingBottom: z.number().optional(),
-			paddingLeft: z.number().optional(),
-			gap: z.number().optional(),
-			width: z.union([z.number(), z.string()]).optional(),
-			height: z.union([z.number(), z.string()]).optional(),
-		}).optional(),
-		typography: z.object({
-			fontFamily: z.string().optional(),
-			fontSize: z.number().optional(),
-			fontWeight: z.union([z.number(), z.string()]).optional(),
-			lineHeight: z.union([z.number(), z.string()]).optional(),
-			letterSpacing: z.number().optional(),
-		}).optional(),
-		metadata: z.object({
-			name: z.string().optional(),
-			description: z.string().optional(),
-		}).optional(),
-	}),
+	codeSpec: codeSpecSchema,
 	canonicalSource: z.enum(["design", "code"]).optional().default("design"),
+	enrich: z.boolean().optional().default(true),
 });
 
 const executeInputSchema = z.object({
@@ -289,7 +262,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		name: "figma_check_design_parity",
 		summary: "Compare a Figma node against code-side spec data.",
 		description:
-			"Registry-backed parity check for HTTP/CLI. Compares visual, spacing, typography, and metadata properties between Figma and code input.",
+			"Registry-backed parity check for HTTP/CLI. Mirrors the original MCP parity flow, including visual, spacing, typography, tokens, component API, accessibility, and metadata analysis.",
 		tags: ["figma", "parity", "design-system", "analysis"],
 		discoveryGroup: "analysis",
 		inputSchema: parityInputSchema,
@@ -325,42 +298,14 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 
 			const fileKey = resolveFileKey(targetUrl);
 			const api = await runtime.getFigmaAPI();
-			const nodesResponse = await api.getNodes(fileKey, [input.nodeId], { depth: 3 });
-			const nodeData = nodesResponse?.nodes?.[input.nodeId];
-			if (!nodeData?.document) {
-				throw new Error(`Node ${input.nodeId} not found in file ${fileKey}`);
-			}
-
-			const node = nodeData.document;
-			const visualNode = resolveVisualNode(node);
-			const discrepancies = buildParityDiscrepancies(visualNode, node, input.codeSpec);
-			const counts = summarizeSeverities(discrepancies);
-			const parityScore = Math.max(0, 100 - (counts.critical * 15 + counts.major * 8 + counts.minor * 3 + counts.info));
-
-			return {
-				summary: {
-					totalDiscrepancies: discrepancies.length,
-					parityScore,
-					byCritical: counts.critical,
-					byMajor: counts.major,
-					byMinor: counts.minor,
-					byInfo: counts.info,
-				},
-				discrepancies,
+			return runDesignParityCheck({
+				api,
+				fileKey,
+				nodeId: input.nodeId,
+				codeSpec: input.codeSpec as CodeSpec,
 				canonicalSource: input.canonicalSource,
-				designData: {
-					name: node.name,
-					type: node.type,
-					nodeId: input.nodeId,
-					fills: visualNode.fills,
-					strokes: visualNode.strokes,
-					cornerRadius: visualNode.cornerRadius,
-					opacity: visualNode.opacity,
-					spacing: extractSpacing(visualNode),
-					typography: extractTypography(visualNode),
-				},
-				codeData: input.codeSpec,
-			};
+				enrich: input.enrich,
+			});
 		},
 	};
 
@@ -411,7 +356,12 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
-	return [getVariablesTool, searchComponentsTool, parityTool, executeTool];
+	return [
+		getVariablesTool,
+		searchComponentsTool,
+		parityTool,
+		executeTool,
+	];
 }
 
 async function loadLocalManifest(runtime: { getCurrentFileUrl(): string | null; getDesktopConnector(): Promise<any> }) {
@@ -535,142 +485,4 @@ function filterComponentResults(results: any[], query?: string, category?: strin
 			result.description?.toLowerCase().includes(categoryLower);
 		return matchesQuery && matchesCategory;
 	});
-}
-
-function buildParityDiscrepancies(visualNode: any, node: any, codeSpec: ParityInput["codeSpec"]) {
-	const discrepancies: any[] = [];
-
-	const designFill = extractFirstFillColor(visualNode.fills);
-	const designStroke = extractFirstStrokeColor(visualNode.strokes);
-	const designSpacing = extractSpacing(visualNode);
-	const designTypography = extractTypography(visualNode);
-
-	if (codeSpec.visual?.backgroundColor && designFill && normalizeColor(codeSpec.visual.backgroundColor) !== normalizeColor(designFill)) {
-		discrepancies.push(makeDiscrepancy("visual", "backgroundColor", "major", designFill, codeSpec.visual.backgroundColor));
-	}
-	if (codeSpec.visual?.borderColor && designStroke && normalizeColor(codeSpec.visual.borderColor) !== normalizeColor(designStroke)) {
-		discrepancies.push(makeDiscrepancy("visual", "borderColor", "major", designStroke, codeSpec.visual.borderColor));
-	}
-	if (codeSpec.visual?.borderRadius !== undefined && !numericClose(Number(visualNode.cornerRadius || 0), codeSpec.visual.borderRadius)) {
-		discrepancies.push(makeDiscrepancy("visual", "borderRadius", "major", visualNode.cornerRadius || 0, codeSpec.visual.borderRadius));
-	}
-	if (codeSpec.visual?.borderWidth !== undefined && !numericClose(Number(visualNode.strokeWeight || 0), codeSpec.visual.borderWidth)) {
-		discrepancies.push(makeDiscrepancy("visual", "borderWidth", "minor", visualNode.strokeWeight || 0, codeSpec.visual.borderWidth));
-	}
-	if (codeSpec.visual?.opacity !== undefined && !numericClose(Number(visualNode.opacity ?? 1), codeSpec.visual.opacity, 0.01)) {
-		discrepancies.push(makeDiscrepancy("visual", "opacity", "minor", visualNode.opacity ?? 1, codeSpec.visual.opacity));
-	}
-
-	for (const prop of ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "gap"] as const) {
-		const codeValue = codeSpec.spacing?.[prop];
-		const designValue = designSpacing[prop];
-		if (codeValue !== undefined && designValue !== undefined && !numericClose(Number(designValue), Number(codeValue))) {
-			discrepancies.push(makeDiscrepancy("spacing", prop, "major", designValue, codeValue));
-		}
-	}
-
-	for (const prop of ["width", "height"] as const) {
-		const codeValue = codeSpec.spacing?.[prop];
-		const designValue = designSpacing[prop];
-		if (typeof codeValue === "number" && designValue !== undefined && !numericClose(Number(designValue), codeValue)) {
-			discrepancies.push(makeDiscrepancy("spacing", prop, "minor", designValue, codeValue));
-		}
-	}
-
-	if (codeSpec.typography?.fontFamily && designTypography.fontFamily && codeSpec.typography.fontFamily !== designTypography.fontFamily) {
-		discrepancies.push(makeDiscrepancy("typography", "fontFamily", "major", designTypography.fontFamily, codeSpec.typography.fontFamily));
-	}
-	if (codeSpec.typography?.fontSize !== undefined && designTypography.fontSize !== undefined && !numericClose(Number(designTypography.fontSize), codeSpec.typography.fontSize)) {
-		discrepancies.push(makeDiscrepancy("typography", "fontSize", "major", designTypography.fontSize, codeSpec.typography.fontSize));
-	}
-	if (codeSpec.typography?.fontWeight !== undefined && designTypography.fontWeight !== undefined && String(designTypography.fontWeight) !== String(codeSpec.typography.fontWeight)) {
-		discrepancies.push(makeDiscrepancy("typography", "fontWeight", "minor", designTypography.fontWeight, codeSpec.typography.fontWeight));
-	}
-
-	if (codeSpec.metadata?.name && node.name && codeSpec.metadata.name !== node.name) {
-		discrepancies.push(makeDiscrepancy("naming", "componentName", "info", node.name, codeSpec.metadata.name));
-	}
-
-	const designDescription = node.description || "";
-	if (codeSpec.metadata?.description && designDescription && normalizeText(designDescription) !== normalizeText(codeSpec.metadata.description)) {
-		discrepancies.push(makeDiscrepancy("metadata", "description", "info", designDescription, codeSpec.metadata.description));
-	}
-
-	return discrepancies;
-}
-
-function makeDiscrepancy(category: string, property: string, severity: string, designValue: unknown, codeValue: unknown) {
-	return {
-		category,
-		property,
-		severity,
-		designValue,
-		codeValue,
-		message: `${property} differs between design and code`,
-	};
-}
-
-function summarizeSeverities(discrepancies: Array<{ severity: string }>) {
-	return discrepancies.reduce(
-		(acc, discrepancy) => {
-			if (discrepancy.severity in acc) {
-				acc[discrepancy.severity as keyof typeof acc] += 1;
-			}
-			return acc;
-		},
-		{ critical: 0, major: 0, minor: 0, info: 0 },
-	);
-}
-
-function extractFirstFillColor(fills: any[]): string | null {
-	if (!fills || !Array.isArray(fills)) return null;
-	const solid = fills.find((fill: any) => fill.type === "SOLID" && fill.visible !== false);
-	if (!solid?.color) return null;
-	return figmaRGBAToHex({ ...solid.color, a: solid.opacity ?? solid.color.a ?? 1 });
-}
-
-function extractFirstStrokeColor(strokes: any[]): string | null {
-	if (!strokes || !Array.isArray(strokes)) return null;
-	const solid = strokes.find((stroke: any) => stroke.type === "SOLID" && stroke.visible !== false);
-	if (!solid?.color) return null;
-	return figmaRGBAToHex({ ...solid.color, a: solid.opacity ?? solid.color.a ?? 1 });
-}
-
-function extractSpacing(node: any) {
-	return {
-		paddingTop: node.paddingTop,
-		paddingRight: node.paddingRight,
-		paddingBottom: node.paddingBottom,
-		paddingLeft: node.paddingLeft,
-		gap: node.itemSpacing,
-		width: node.absoluteBoundingBox?.width,
-		height: node.absoluteBoundingBox?.height,
-	};
-}
-
-function extractTypography(node: any) {
-	const targetNode = findFirstTextNode(node);
-	const style = targetNode?.style || {};
-	return {
-		fontFamily: style.fontFamily,
-		fontSize: style.fontSize,
-		fontWeight: style.fontWeight,
-		lineHeight: style.lineHeightPx,
-		letterSpacing: style.letterSpacing,
-	};
-}
-
-function findFirstTextNode(node: any): any | null {
-	if (!node) return null;
-	if (node.type === "TEXT") return node;
-	if (!Array.isArray(node.children)) return null;
-	for (const child of node.children) {
-		const found = findFirstTextNode(child);
-		if (found) return found;
-	}
-	return null;
-}
-
-function normalizeText(value: string): string {
-	return value.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 }
