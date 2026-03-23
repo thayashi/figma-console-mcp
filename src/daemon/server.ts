@@ -23,7 +23,7 @@ async function main(): Promise<void> {
 		await runtime.start();
 		const preferredHttpPort = parseInt(process.env.FIGMA_HTTP_PORT || "3847", 10);
 		const httpHost = process.env.FIGMA_HTTP_HOST || "127.0.0.1";
-		const { port: httpPort } = await startHttpServerWithFallback(
+		const { server: httpServer, port: httpPort } = await startHttpServerWithFallback(
 			preferredHttpPort,
 			httpHost,
 			runtime,
@@ -48,6 +48,48 @@ async function main(): Promise<void> {
 			startedAt: new Date().toISOString(),
 		});
 
+		let shuttingDown = false;
+		const shutdown = async (signal: string) => {
+			if (shuttingDown) {
+				return;
+			}
+			shuttingDown = true;
+
+			logger.info({ signal, httpPort, wsPort: runtime.getWsPort() }, "Shutting down Figma daemon");
+			clearHttpDiscovery();
+
+			await new Promise<void>((resolve, reject) => {
+				httpServer.close((error?: Error) => {
+					if (error) {
+						reject(error);
+						return;
+					}
+					resolve();
+				});
+			});
+			await runtime.stop();
+		};
+
+		process.on("SIGINT", () => {
+			void shutdown("SIGINT")
+				.then(() => process.exit(0))
+				.catch((error) => {
+					const message = error instanceof Error ? error.message : String(error);
+					logger.error({ error: message }, "Failed to shut down daemon after SIGINT");
+					process.exit(1);
+				});
+		});
+
+		process.on("SIGTERM", () => {
+			void shutdown("SIGTERM")
+				.then(() => process.exit(0))
+				.catch((error) => {
+					const message = error instanceof Error ? error.message : String(error);
+					logger.error({ error: message }, "Failed to shut down daemon after SIGTERM");
+					process.exit(1);
+				});
+		});
+
 		process.stdin.resume();
 		return;
 	}
@@ -69,7 +111,7 @@ async function startHttpServerWithFallback(
 	host: string,
 	runtime: LocalDaemonRuntime,
 	registry: ToolRegistry,
-): Promise<{ port: number }> {
+): Promise<{ server: Awaited<ReturnType<typeof startHttpServer>>["server"]; port: number }> {
 	for (let port = preferredPort; port < preferredPort + 10; port++) {
 		try {
 			const started = await startHttpServer({
@@ -78,7 +120,7 @@ async function startHttpServerWithFallback(
 				runtime,
 				registry,
 			});
-			return { port: started.port };
+			return started;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
