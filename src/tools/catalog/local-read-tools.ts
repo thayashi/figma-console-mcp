@@ -33,10 +33,66 @@ const executeInputSchema = z.object({
 	timeout: z.number().int().min(1).max(30000).optional().default(5000),
 });
 
+const instantiateComponentInputSchema = z.object({
+	componentKey: z.string().optional(),
+	nodeId: z.string().optional(),
+	variant: z.record(z.string()).optional(),
+	overrides: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+	position: z.object({
+		x: z.number(),
+		y: z.number(),
+	}).optional(),
+	parentId: z.string().optional(),
+});
+
+const setInstancePropertiesInputSchema = z.object({
+	nodeId: z.string(),
+	properties: z.record(z.string(), z.union([z.string(), z.boolean()])),
+});
+
+const addComponentPropertyInputSchema = z.object({
+	nodeId: z.string(),
+	propertyName: z.string(),
+	type: z.enum(["BOOLEAN", "TEXT", "INSTANCE_SWAP", "VARIANT"]),
+	defaultValue: z.union([z.string(), z.number(), z.boolean()]),
+});
+
+const setDescriptionInputSchema = z.object({
+	nodeId: z.string(),
+	description: z.string(),
+	descriptionMarkdown: z.string().optional(),
+});
+
+const editComponentPropertyInputSchema = z.object({
+	nodeId: z.string(),
+	propertyName: z.string(),
+	newValue: z.object({
+		name: z.string().optional(),
+		defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
+		preferredValues: z.array(
+			z.object({
+				type: z.enum(["COMPONENT", "COMPONENT_SET"]),
+				key: z.string(),
+			}),
+		).optional(),
+	}),
+});
+
+const deleteComponentPropertyInputSchema = z.object({
+	nodeId: z.string(),
+	propertyName: z.string(),
+});
+
 type VariablesInput = z.infer<typeof variablesInputSchema>;
 type SearchComponentsInput = z.infer<typeof searchComponentsInputSchema>;
 type ParityInput = z.infer<typeof parityInputSchema>;
 type ExecuteInput = z.infer<typeof executeInputSchema>;
+type InstantiateComponentInput = z.infer<typeof instantiateComponentInputSchema>;
+type SetInstancePropertiesInput = z.infer<typeof setInstancePropertiesInputSchema>;
+type AddComponentPropertyInput = z.infer<typeof addComponentPropertyInputSchema>;
+type SetDescriptionInput = z.infer<typeof setDescriptionInputSchema>;
+type EditComponentPropertyInput = z.infer<typeof editComponentPropertyInputSchema>;
+type DeleteComponentPropertyInput = z.infer<typeof deleteComponentPropertyInputSchema>;
 
 function resolveFileKey(url: string): string {
 	const urlInfo = extractFigmaUrlInfo(url);
@@ -356,11 +412,364 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const instantiateComponentTool: ToolDefinition<InstantiateComponentInput, any> = {
+		name: "figma_instantiate_component",
+		summary: "Instantiate a component in the connected Figma file.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Creates an instance from a component key or nodeId through the Desktop Bridge plugin, with variant selection, overrides, positioning, and optional parent placement.",
+		tags: ["figma", "write", "components", "instantiate"],
+		discoveryGroup: "write",
+		inputSchema: instantiateComponentInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Instantiate a variant by key and place it at a position",
+				input: {
+					componentKey: "123abcVariantKey",
+					nodeId: "456:789",
+					position: { x: 120, y: 240 },
+					variant: { State: "Hover" },
+					overrides: { "Button Label": "Click Me" },
+				},
+			},
+		],
+		relatedTools: ["figma_search_components", "figma_execute"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: InstantiateComponentInput) => {
+			if (!input.componentKey && !input.nodeId) {
+				throw new Error("Either componentKey or nodeId is required.");
+			}
+
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.instantiateComponent(input.componentKey || "", {
+				nodeId: input.nodeId,
+				position: input.position,
+				overrides: input.overrides,
+				variant: input.variant,
+				parentId: input.parentId,
+			});
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to instantiate component");
+			}
+
+			return {
+				success: true,
+				message: "Component instantiated successfully",
+				instance: result.instance,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setInstancePropertiesTool: ToolDefinition<SetInstancePropertiesInput, any> = {
+		name: "figma_set_instance_properties",
+		summary: "Set component properties on an instance node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates TEXT, BOOLEAN, and VARIANT component properties on an instance through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "instances", "components"],
+		discoveryGroup: "write",
+		inputSchema: setInstancePropertiesInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set text and boolean properties on an instance",
+				input: {
+					nodeId: "123:456",
+					properties: {
+						Label: "Save",
+						"Show Icon": true,
+					},
+				},
+			},
+		],
+		relatedTools: ["figma_instantiate_component", "figma_execute"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetInstancePropertiesInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setInstanceProperties(input.nodeId, input.properties);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set instance properties");
+			}
+
+			return {
+				success: true,
+				instance: result.instance,
+				metadata: {
+					note: "Instance properties updated successfully. Use figma_capture_screenshot to verify visual changes.",
+				},
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const addComponentPropertyTool: ToolDefinition<AddComponentPropertyInput, any> = {
+		name: "figma_add_component_property",
+		summary: "Add a component property to a component or component set.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Adds BOOLEAN, TEXT, INSTANCE_SWAP, or VARIANT properties through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "components", "properties"],
+		discoveryGroup: "write",
+		inputSchema: addComponentPropertyInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Add a boolean property to a component set",
+				input: {
+					nodeId: "123:456",
+					propertyName: "Show Icon",
+					type: "BOOLEAN",
+					defaultValue: true,
+				},
+			},
+		],
+		relatedTools: ["figma_instantiate_component", "figma_set_instance_properties"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: AddComponentPropertyInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.addComponentProperty(
+				input.nodeId,
+				input.propertyName,
+				input.type,
+				input.defaultValue,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to add property");
+			}
+
+			return {
+				success: true,
+				message: "Component property added",
+				propertyName: result.propertyName,
+				hint: "The property name includes a unique suffix (e.g., 'Show Icon#123:456'). Use the full name for editing/deleting.",
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setDescriptionTool: ToolDefinition<SetDescriptionInput, any> = {
+		name: "figma_set_description",
+		summary: "Set the description on a component, component set, or style.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates plain text and optional markdown descriptions through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "metadata", "documentation"],
+		discoveryGroup: "write",
+		inputSchema: setDescriptionInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set a component description with markdown",
+				input: {
+					nodeId: "123:456",
+					description: "Primary call to action button.",
+					descriptionMarkdown: "## Usage\nUse for primary actions.",
+				},
+			},
+		],
+		relatedTools: ["figma_add_component_property", "figma_check_design_parity"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetDescriptionInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setNodeDescription(
+				input.nodeId,
+				input.description,
+				input.descriptionMarkdown,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set description");
+			}
+
+			return {
+				success: true,
+				message: "Description set successfully",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const editComponentPropertyTool: ToolDefinition<EditComponentPropertyInput, any> = {
+		name: "figma_edit_component_property",
+		summary: "Edit an existing component property.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates a component property's name, default value, or preferred values through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "components", "properties"],
+		discoveryGroup: "write",
+		inputSchema: editComponentPropertyInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Rename a component property and update its default value",
+				input: {
+					nodeId: "123:456",
+					propertyName: "Show Icon#123:456",
+					newValue: {
+						name: "Show Leading Icon",
+						defaultValue: true,
+					},
+				},
+			},
+		],
+		relatedTools: ["figma_add_component_property", "figma_delete_component_property"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: EditComponentPropertyInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.editComponentProperty(
+				input.nodeId,
+				input.propertyName,
+				input.newValue,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to edit property");
+			}
+
+			return {
+				success: true,
+				message: "Component property updated",
+				propertyName: result.propertyName,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const deleteComponentPropertyTool: ToolDefinition<DeleteComponentPropertyInput, any> = {
+		name: "figma_delete_component_property",
+		summary: "Delete a component property.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Deletes a component property through the Desktop Bridge plugin. This is a destructive operation.",
+		tags: ["figma", "write", "components", "properties"],
+		discoveryGroup: "write",
+		inputSchema: deleteComponentPropertyInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Delete a component property by full name",
+				input: {
+					nodeId: "123:456",
+					propertyName: "Show Icon#123:456",
+				},
+			},
+		],
+		relatedTools: ["figma_add_component_property", "figma_edit_component_property"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: DeleteComponentPropertyInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.deleteComponentProperty(
+				input.nodeId,
+				input.propertyName,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to delete property");
+			}
+
+			return {
+				success: true,
+				message: "Component property deleted",
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	return [
 		getVariablesTool,
 		searchComponentsTool,
 		parityTool,
 		executeTool,
+		instantiateComponentTool,
+		setInstancePropertiesTool,
+		addComponentPropertyTool,
+		setDescriptionTool,
+		editComponentPropertyTool,
+		deleteComponentPropertyTool,
 	];
 }
 
