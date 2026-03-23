@@ -68,6 +68,12 @@ const componentImageInputSchema = z.object({
 	format: z.enum(["png", "jpg", "svg", "pdf"]).optional().default("png"),
 });
 
+const componentForDevelopmentInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	nodeId: z.string(),
+	includeImage: z.boolean().optional().default(true),
+});
+
 const parityInputSchema = z.object({
 	fileUrl: z.string().url().optional(),
 	nodeId: z.string(),
@@ -156,6 +162,7 @@ type LibraryComponentsInput = z.infer<typeof libraryComponentsInputSchema>;
 type DesignSystemSummaryInput = z.infer<typeof designSystemSummaryInputSchema>;
 type TokenValuesInput = z.infer<typeof tokenValuesInputSchema>;
 type ComponentImageInput = z.infer<typeof componentImageInputSchema>;
+type ComponentForDevelopmentInput = z.infer<typeof componentForDevelopmentInputSchema>;
 type ParityInput = z.infer<typeof parityInputSchema>;
 type GetStatusInput = z.infer<typeof getStatusInputSchema>;
 type GetSelectionInput = z.infer<typeof getSelectionInputSchema>;
@@ -298,6 +305,75 @@ function filterFileNodeForPlugin(node: any): any {
 
 	if (node.children) {
 		filtered.children = node.children.map((child: any) => filterFileNodeForPlugin(child));
+	}
+
+	return filtered;
+}
+
+function filterComponentNodeForDevelopment(node: any): any {
+	if (!node) {
+		return node;
+	}
+
+	const filtered: any = {
+		id: node.id,
+		name: node.name,
+		type: node.type,
+		...(node.description && { description: node.description }),
+		...(node.descriptionMarkdown && { descriptionMarkdown: node.descriptionMarkdown }),
+	};
+
+	if (node.absoluteBoundingBox) filtered.absoluteBoundingBox = node.absoluteBoundingBox;
+	if (node.relativeTransform) filtered.relativeTransform = node.relativeTransform;
+	if (node.size) filtered.size = node.size;
+	if (node.constraints) filtered.constraints = node.constraints;
+	if (node.layoutAlign) filtered.layoutAlign = node.layoutAlign;
+	if (node.layoutGrow) filtered.layoutGrow = node.layoutGrow;
+	if (node.layoutPositioning) filtered.layoutPositioning = node.layoutPositioning;
+
+	if (node.layoutMode) filtered.layoutMode = node.layoutMode;
+	if (node.primaryAxisSizingMode) filtered.primaryAxisSizingMode = node.primaryAxisSizingMode;
+	if (node.counterAxisSizingMode) filtered.counterAxisSizingMode = node.counterAxisSizingMode;
+	if (node.primaryAxisAlignItems) filtered.primaryAxisAlignItems = node.primaryAxisAlignItems;
+	if (node.counterAxisAlignItems) filtered.counterAxisAlignItems = node.counterAxisAlignItems;
+	if (node.paddingLeft !== undefined) filtered.paddingLeft = node.paddingLeft;
+	if (node.paddingRight !== undefined) filtered.paddingRight = node.paddingRight;
+	if (node.paddingTop !== undefined) filtered.paddingTop = node.paddingTop;
+	if (node.paddingBottom !== undefined) filtered.paddingBottom = node.paddingBottom;
+	if (node.itemSpacing !== undefined) filtered.itemSpacing = node.itemSpacing;
+	if (node.itemReverseZIndex) filtered.itemReverseZIndex = node.itemReverseZIndex;
+	if (node.strokesIncludedInLayout) filtered.strokesIncludedInLayout = node.strokesIncludedInLayout;
+
+	if (node.fills) filtered.fills = node.fills;
+	if (node.strokes) filtered.strokes = node.strokes;
+	if (node.strokeWeight !== undefined) filtered.strokeWeight = node.strokeWeight;
+	if (node.strokeAlign) filtered.strokeAlign = node.strokeAlign;
+	if (node.strokeCap) filtered.strokeCap = node.strokeCap;
+	if (node.strokeJoin) filtered.strokeJoin = node.strokeJoin;
+	if (node.dashPattern) filtered.dashPattern = node.dashPattern;
+	if (node.cornerRadius !== undefined) filtered.cornerRadius = node.cornerRadius;
+	if (node.rectangleCornerRadii) filtered.rectangleCornerRadii = node.rectangleCornerRadii;
+	if (node.effects) filtered.effects = node.effects;
+	if (node.opacity !== undefined) filtered.opacity = node.opacity;
+	if (node.blendMode) filtered.blendMode = node.blendMode;
+	if (node.isMask) filtered.isMask = node.isMask;
+	if (node.clipsContent) filtered.clipsContent = node.clipsContent;
+
+	if (node.characters) filtered.characters = node.characters;
+	if (node.style) filtered.style = node.style;
+	if (node.characterStyleOverrides) filtered.characterStyleOverrides = node.characterStyleOverrides;
+	if (node.styleOverrideTable) filtered.styleOverrideTable = node.styleOverrideTable;
+
+	if (node.componentProperties) filtered.componentProperties = node.componentProperties;
+	if (node.componentPropertyDefinitions) filtered.componentPropertyDefinitions = node.componentPropertyDefinitions;
+	if (node.variantProperties) filtered.variantProperties = node.variantProperties;
+	if (node.componentId) filtered.componentId = node.componentId;
+
+	if (node.visible !== undefined) filtered.visible = node.visible;
+	if (node.locked) filtered.locked = node.locked;
+
+	if (node.children) {
+		filtered.children = node.children.map((child: any) => filterComponentNodeForDevelopment(child));
 	}
 
 	return filtered;
@@ -851,6 +927,89 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 				format,
 				expiresIn: "30 days",
 				note: "Use this image as a visual reference. For runtime-state validation after edits, use figma_capture_screenshot.",
+			};
+		},
+	};
+
+	const getComponentForDevelopmentTool: ToolDefinition<ComponentForDevelopmentInput, any> = {
+		name: "figma_get_component_for_development",
+		summary: "Read component data optimized for UI implementation.",
+		description:
+			"Registry-backed component development tool for HTTP/CLI. Reads implementation-oriented component data through the Figma REST API and can include a rendered image URL for visual reference.",
+		tags: ["figma", "components", "development", "design-to-code", "image"],
+		discoveryGroup: "document",
+		inputSchema: componentForDevelopmentInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Read component implementation data with image",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					nodeId: "123:456",
+				},
+			},
+		],
+		relatedTools: ["figma_get_component_details", "figma_get_component_image", "figma_get_file_for_plugin"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: ComponentForDevelopmentInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+			const includeImage = input.includeImage ?? true;
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			const nodeData = await api.getNodes(fileKey, [input.nodeId], { depth: 2 });
+			const node = nodeData.nodes?.[input.nodeId]?.document;
+
+			if (!node) {
+				throw new Error(`Component not found: ${input.nodeId}`);
+			}
+
+			let imageUrl: string | null = null;
+			if (includeImage) {
+				try {
+					const imageResult = await api.getImages(fileKey, input.nodeId, {
+						scale: 2,
+						format: "png",
+						contents_only: true,
+					});
+					imageUrl = imageResult.images?.[input.nodeId] || null;
+				} catch {
+					imageUrl = null;
+				}
+			}
+
+			return {
+				fileKey,
+				fileUrl: targetUrl,
+				nodeId: input.nodeId,
+				imageUrl,
+				component: filterComponentNodeForDevelopment(node),
+				metadata: {
+					purpose: "component_development",
+					note: imageUrl
+						? "Image URL provided for visual reference. Component data is filtered for UI implementation."
+						: "Component data is filtered for UI implementation.",
+				},
+				timestamp: Date.now(),
 			};
 		},
 	};
@@ -1667,6 +1826,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		getTokenValuesTool,
 		getStylesTool,
 		getComponentImageTool,
+		getComponentForDevelopmentTool,
 		parityTool,
 		getStatusTool,
 		getSelectionTool,

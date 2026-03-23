@@ -24,6 +24,7 @@ describe("Local Read Tool Definitions", () => {
 		expect(readToolNames.has("figma_get_token_values")).toBe(true);
 		expect(readToolNames.has("figma_get_styles")).toBe(true);
 		expect(readToolNames.has("figma_get_component_image")).toBe(true);
+		expect(readToolNames.has("figma_get_component_for_development")).toBe(true);
 		expect(readToolNames.has("figma_get_status")).toBe(true);
 		expect(readToolNames.has("figma_get_selection")).toBe(true);
 		expect(readToolNames.has("figma_list_open_files")).toBe(true);
@@ -687,6 +688,79 @@ describe("Local Read Tool Definitions", () => {
 		expect(result.error).toBe("COMPONENT_SET_NOT_RENDERABLE");
 		expect(result.availableVariants).toEqual(["Size=sm", "Size=md"]);
 		expect(api.getImages).not.toHaveBeenCalled();
+	});
+
+	it("get component for development tool returns filtered implementation data and image", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_component_for_development");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getNodes: jest.fn().mockResolvedValue({
+				nodes: {
+					"10:20": {
+						document: {
+							id: "10:20",
+							name: "Button",
+							type: "COMPONENT",
+							absoluteBoundingBox: { x: 1, y: 2, width: 120, height: 40 },
+							layoutMode: "HORIZONTAL",
+							paddingLeft: 16,
+							paddingRight: 16,
+							itemSpacing: 8,
+							fills: [{ type: "SOLID" }],
+							characters: "Save",
+							style: { fontFamily: "Inter", fontSize: 14 },
+							componentProperties: { Label: { type: "TEXT", value: "Save" } },
+							visible: true,
+							locked: false,
+							pluginData: { ignored: true },
+							children: [
+								{
+									id: "10:21",
+									name: "Label",
+									type: "TEXT",
+									characters: "Save",
+								},
+							],
+						},
+					},
+				},
+			}),
+			getImages: jest.fn().mockResolvedValue({
+				images: {
+					"10:20": "https://figma.example/dev-component.png",
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{ nodeId: "10:20", includeImage: true },
+		);
+
+		expect(api.getNodes).toHaveBeenCalledWith("abc123", ["10:20"], { depth: 2 });
+		expect(api.getImages).toHaveBeenCalledWith("abc123", "10:20", {
+			scale: 2,
+			format: "png",
+			contents_only: true,
+		});
+		expect(result.imageUrl).toBe("https://figma.example/dev-component.png");
+		expect(result.component).toMatchObject({
+			id: "10:20",
+			name: "Button",
+			type: "COMPONENT",
+			layoutMode: "HORIZONTAL",
+			paddingLeft: 16,
+			itemSpacing: 8,
+			characters: "Save",
+			componentProperties: { Label: { type: "TEXT", value: "Save" } },
+		});
+		expect(result.component.pluginData).toBeUndefined();
 	});
 
 	it("get design changes tool returns buffered events and clears when requested", async () => {

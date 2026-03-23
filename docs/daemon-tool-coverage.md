@@ -21,9 +21,9 @@ Compared sources:
 ## Snapshot
 
 - legacy unique tool names: 61
-- daemon-first registry tool names: 55
-- exact name overlap: 52
-- legacy names not present in registry: 9
+- daemon-first registry tool names: 56
+- exact name overlap: 53
+- legacy names not present in registry: 8
 - registry-only names: 3
 
 Registry-only names:
@@ -46,7 +46,6 @@ Legacy tool names that do not currently exist as registry-backed daemon tools:
 - `figma_arrange_component_set`
 - `figma_generate_component_doc`
 - `figma_get_component`
-- `figma_get_component_for_development`
 - `figma_get_design_system_kit`
 - `figma_navigate`
 - `figma_pair_plugin`
@@ -76,9 +75,6 @@ These are not strong candidates for the runtime/registry layer as currently desi
 - `figma_get_component`
   - partially covered by `figma_get_component_details`, `figma_get_component_image`, and `figma_get_file_data`
   - still missing the older single-call metadata/reconstruction shape
-- `figma_get_component_for_development`
-  - partially covered by `figma_get_component_details`, `figma_get_component_image`, and `figma_get_file_data`
-  - still missing the single-call implementation-oriented response
 - `figma_get_design_system_kit`
   - partially covered by `figma_get_design_system_summary`, `figma_get_token_values`, `figma_get_variables`, `figma_get_library_components`, and `figma_get_component_details`
   - still missing the one-shot combined extraction format
@@ -89,7 +85,6 @@ These still look like real daemon-first coverage gaps rather than naming changes
 
 - component/docs workflows:
   - `figma_get_component`
-  - `figma_get_component_for_development`
   - `figma_generate_component_doc`
 - design-system aggregate workflow:
   - `figma_get_design_system_kit`
