@@ -26,6 +26,7 @@ describe("Local Read Tool Definitions", () => {
 		expect(readToolNames.has("figma_get_status")).toBe(true);
 		expect(readToolNames.has("figma_get_selection")).toBe(true);
 		expect(readToolNames.has("figma_list_open_files")).toBe(true);
+		expect(readToolNames.has("figma_get_comments")).toBe(true);
 		expect(readToolNames.has("figma_get_file_data")).toBe(true);
 		expect(readToolNames.has("figma_get_design_changes")).toBe(true);
 		expect(readToolNames.has("figma_get_console_logs")).toBe(true);
@@ -39,6 +40,8 @@ describe("Local Read Tool Definitions", () => {
 		expect(writeToolNames.has("figma_batch_create_variables")).toBe(true);
 		expect(writeToolNames.has("figma_setup_design_tokens")).toBe(true);
 		expect(writeToolNames.has("figma_instantiate_component")).toBe(true);
+		expect(writeToolNames.has("figma_post_comment")).toBe(true);
+		expect(writeToolNames.has("figma_delete_comment")).toBe(true);
 		expect(writeToolNames.has("figma_check_design_parity")).toBe(false);
 
 		for (const toolName of readToolNames) {
@@ -68,6 +71,7 @@ describe("Local Read Tool Definitions", () => {
 		expect(discoveryGroupByName.get("figma_execute")).toBe("execute");
 		expect(discoveryGroupByName.get("figma_update_variable")).toBe("variables");
 		expect(discoveryGroupByName.get("figma_instantiate_component")).toBe("components");
+		expect(discoveryGroupByName.get("figma_post_comment")).toBe("comments");
 		expect(discoveryGroupByName.get("figma_set_text_content")).toBe("content");
 		expect(discoveryGroupByName.get("figma_set_fills")).toBe("styling");
 		expect(discoveryGroupByName.get("figma_set_description")).toBe("metadata");
@@ -148,6 +152,37 @@ describe("Local Read Tool Definitions", () => {
 		expect(result.totalFiles).toBe(1);
 		expect(result.activeFileKey).toBe("abc123");
 		expect(result.files[0].url).toContain("/abc123/");
+	});
+
+	it("get comments tool returns only active comments by default", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_comments");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getComments: jest.fn().mockResolvedValue({
+				comments: [
+					{ id: "1", message: "Open thread", resolved_at: null },
+					{ id: "2", message: "Resolved thread", resolved_at: "2026-03-22T00:00:00Z" },
+				],
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{},
+		);
+
+		expect(api.getComments).toHaveBeenCalledWith("abc123", { as_md: false });
+		expect(result.fileKey).toBe("abc123");
+		expect(result.comments).toHaveLength(1);
+		expect(result.summary.total).toBe(2);
+		expect(result.summary.active).toBe(1);
+		expect(result.summary.resolved).toBe(1);
 	});
 
 	it("get file data tool fetches and filters file structure", async () => {
@@ -787,6 +822,69 @@ describe("Local Read Tool Definitions", () => {
 		expect(connector.executeCodeViaUI.mock.calls[0][0]).toContain("createVariableCollection");
 		expect(result.collectionName).toBe("Brand Tokens");
 		expect(result.created).toBe(1);
+	});
+
+	it("post comment handler proxies to the Figma API", async () => {
+		const tool = createLocalWriteToolDefinitions().find((candidate) => candidate.name === "figma_post_comment");
+		expect(tool).toBeDefined();
+
+		const api = {
+			postComment: jest.fn().mockResolvedValue({
+				id: "c1",
+				message: "Please review this.",
+				created_at: "2026-03-22T00:00:00Z",
+				user: { id: "u1", handle: "designer" },
+				client_meta: { node_id: "123:456", node_offset: { x: 0, y: 0 } },
+				order_id: "100",
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{
+				message: "Please review this.",
+				node_id: "123:456",
+			},
+		);
+
+		expect(api.postComment).toHaveBeenCalledWith(
+			"abc123",
+			"Please review this.",
+			{ node_id: "123:456", node_offset: { x: 0, y: 0 } },
+			undefined,
+		);
+		expect(result.success).toBe(true);
+		expect(result.comment.id).toBe("c1");
+	});
+
+	it("delete comment handler proxies to the Figma API", async () => {
+		const tool = createLocalWriteToolDefinitions().find((candidate) => candidate.name === "figma_delete_comment");
+		expect(tool).toBeDefined();
+
+		const api = {
+			deleteComment: jest.fn().mockResolvedValue(undefined),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{
+				comment_id: "c1",
+			},
+		);
+
+		expect(api.deleteComment).toHaveBeenCalledWith("abc123", "c1");
+		expect(result.success).toBe(true);
+		expect(result.deletedCommentId).toBe("c1");
 	});
 
 	it("instantiate component tool schema accepts key, nodeId, and placement options", () => {

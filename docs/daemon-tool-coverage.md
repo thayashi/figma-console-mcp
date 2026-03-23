@@ -21,19 +21,18 @@ Compared sources:
 ## Snapshot
 
 - legacy unique tool names: 61
-- daemon-first registry tool names: 50
-- exact name overlap: 47
-- legacy names not present in registry: 14
+- daemon-first registry tool names: 53
+- exact name overlap: 50
+- legacy names not present in registry: 11
 - registry-only names: 3
 
 Registry-only names:
 
-- `figma_capture_screenshot`
 - `figma_set_opacity`
 - `figma_set_corner_radius`
 - `figma_set_text_content`
 
-The first and last entries are effectively daemon-first naming cleanups over older MCP/local names:
+One of these entries is effectively a daemon-first naming cleanup over an older MCP/local name:
 
 - `figma_take_screenshot` -> `figma_capture_screenshot`
 - `figma_set_text` -> `figma_set_text_content`
@@ -45,9 +44,7 @@ That means functional parity is slightly better than the raw exact-name count su
 Legacy tool names that do not currently exist as registry-backed daemon tools:
 
 - `figma_arrange_component_set`
-- `figma_delete_comment`
 - `figma_generate_component_doc`
-- `figma_get_comments`
 - `figma_get_component`
 - `figma_get_component_for_development`
 - `figma_get_design_system_kit`
@@ -55,7 +52,6 @@ Legacy tool names that do not currently exist as registry-backed daemon tools:
 - `figma_get_styles`
 - `figma_navigate`
 - `figma_pair_plugin`
-- `figma_post_comment`
 - `figma_set_text`
 - `figma_take_screenshot`
 
@@ -96,10 +92,6 @@ These are not strong candidates for the runtime/registry layer as currently desi
 
 These still look like real daemon-first coverage gaps rather than naming changes:
 
-- comment tools:
-  - `figma_get_comments`
-  - `figma_post_comment`
-  - `figma_delete_comment`
 - styles/design-system REST reads:
   - `figma_get_styles`
   - `figma_get_design_system_kit`
@@ -116,20 +108,6 @@ These still look like real daemon-first coverage gaps rather than naming changes
 
 ### Priority 1
 
-Add registry-backed comment tools:
-
-- `figma_get_comments`
-- `figma_post_comment`
-- `figma_delete_comment`
-
-Reason:
-
-- these are direct Figma REST operations
-- they fit daemon-first HTTP/CLI well
-- they do not depend on browser-only flows
-
-### Priority 2
-
 Add missing REST read tools with clear daemon fit:
 
 - `figma_get_styles`
@@ -141,7 +119,7 @@ Reason:
 - both map cleanly to registry handlers
 - they improve parity without introducing transport-specific behavior
 
-### Priority 3
+### Priority 2
 
 Decide whether to preserve or collapse the higher-level synthesis tools:
 
@@ -155,7 +133,7 @@ Decision needed:
 - preserve legacy tool contracts in the registry, or
 - keep the lower-level daemon tools and explicitly retire these aggregated MCP-era shapes
 
-### Priority 4
+### Priority 3
 
 Evaluate whether `figma_arrange_component_set` belongs in daemon-first.
 

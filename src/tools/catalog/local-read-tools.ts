@@ -76,6 +76,12 @@ const getSelectionInputSchema = z.object({});
 
 const listOpenFilesInputSchema = z.object({});
 
+const getCommentsInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	as_md: z.boolean().optional().default(false),
+	include_resolved: z.boolean().optional().default(false),
+});
+
 const getFileDataInputSchema = z.object({
 	fileUrl: z.string().url().optional(),
 	depth: z.number().min(0).max(3).optional().default(1),
@@ -133,6 +139,7 @@ type ParityInput = z.infer<typeof parityInputSchema>;
 type GetStatusInput = z.infer<typeof getStatusInputSchema>;
 type GetSelectionInput = z.infer<typeof getSelectionInputSchema>;
 type ListOpenFilesInput = z.infer<typeof listOpenFilesInputSchema>;
+type GetCommentsInput = z.infer<typeof getCommentsInputSchema>;
 type GetFileDataInput = z.infer<typeof getFileDataInputSchema>;
 type GetDesignChangesInput = z.infer<typeof getDesignChangesInputSchema>;
 type GetConsoleLogsInput = z.infer<typeof getConsoleLogsInputSchema>;
@@ -933,6 +940,77 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const getCommentsTool: ToolDefinition<GetCommentsInput, any> = {
+		name: "figma_get_comments",
+		summary: "Read comment threads from a Figma file.",
+		description:
+			"Registry-backed comments read tool for HTTP/CLI. Reads file comments through the Figma REST API and can optionally include resolved threads or markdown comment bodies.",
+		tags: ["figma", "comments", "review", "collaboration"],
+		discoveryGroup: "comments",
+		inputSchema: getCommentsInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Read active comments from the current file",
+				input: {},
+			},
+			{
+				title: "Read all comments including resolved threads",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					include_resolved: true,
+				},
+			},
+		],
+		relatedTools: ["figma_post_comment", "figma_delete_comment"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: GetCommentsInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+			const asMarkdown = input.as_md ?? false;
+			const includeResolved = input.include_resolved ?? false;
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			const response = await api.getComments(fileKey, { as_md: asMarkdown });
+			const allComments = response.comments || [];
+			const comments = includeResolved
+				? allComments
+				: allComments.filter((comment: any) => !comment.resolved_at);
+
+			return {
+				fileKey,
+				fileUrl: targetUrl,
+				comments,
+				summary: {
+					total: allComments.length,
+					active: allComments.filter((comment: any) => !comment.resolved_at).length,
+					resolved: allComments.filter((comment: any) => comment.resolved_at).length,
+					returned: comments.length,
+				},
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	const getFileDataTool: ToolDefinition<GetFileDataInput, any> = {
 		name: "figma_get_file_data",
 		summary: "Get file structure and document tree data from the active or specified file.",
@@ -1348,6 +1426,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		getStatusTool,
 		getSelectionTool,
 		listOpenFilesTool,
+		getCommentsTool,
 		getFileDataTool,
 		getDesignChangesTool,
 		getConsoleLogsTool,

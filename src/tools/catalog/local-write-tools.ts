@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractFigmaUrlInfo } from "../../core/figma-api.js";
 import { normalizeToolDefinitions } from "./conventions.js";
 import type { ToolDefinition } from "../types.js";
 
@@ -222,6 +223,20 @@ const deleteComponentPropertyInputSchema = z.object({
 	propertyName: z.string(),
 });
 
+const postCommentInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	message: z.string(),
+	node_id: z.string().optional(),
+	x: z.number().optional(),
+	y: z.number().optional(),
+	reply_to_comment_id: z.string().optional(),
+});
+
+const deleteCommentInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	comment_id: z.string(),
+});
+
 type ExecuteInput = z.infer<typeof executeInputSchema>;
 type UpdateVariableInput = z.infer<typeof updateVariableInputSchema>;
 type CreateVariableInput = z.infer<typeof createVariableInputSchema>;
@@ -252,6 +267,8 @@ type CreateChildInput = z.infer<typeof createChildInputSchema>;
 type SetImageFillInput = z.infer<typeof setImageFillInputSchema>;
 type EditComponentPropertyInput = z.infer<typeof editComponentPropertyInputSchema>;
 type DeleteComponentPropertyInput = z.infer<typeof deleteComponentPropertyInputSchema>;
+type PostCommentInput = z.infer<typeof postCommentInputSchema>;
+type DeleteCommentInput = z.infer<typeof deleteCommentInputSchema>;
 
 const pluginRequiredErrors = [
 	{
@@ -260,6 +277,14 @@ const pluginRequiredErrors = [
 		hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
 	},
 ];
+
+function resolveFileKey(url: string): string {
+	const urlInfo = extractFigmaUrlInfo(url);
+	if (!urlInfo) {
+		throw new Error(`Invalid Figma URL: ${url}`);
+	}
+	return urlInfo.branchId || urlInfo.fileKey;
+}
 
 function buildHexColorBatchHelpers(): string {
 	return `
@@ -1651,6 +1676,148 @@ return {
 		},
 	};
 
+	const postCommentTool: ToolDefinition<PostCommentInput, any> = {
+		name: "figma_post_comment",
+		summary: "Post a comment to a Figma file.",
+		description:
+			"Registry-backed comments write tool for HTTP/CLI. Posts a new comment or thread reply through the Figma REST API and can pin the comment to a specific node position.",
+		tags: ["figma", "comments", "review", "collaboration", "write"],
+		discoveryGroup: "comments",
+		inputSchema: postCommentInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Post a top-level comment",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					message: "Please review the spacing in this section.",
+				},
+			},
+			{
+				title: "Reply to an existing thread on a node",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					message: "This drift is expected until the next release.",
+					node_id: "123:456",
+					reply_to_comment_id: "74382910",
+				},
+			},
+		],
+		relatedTools: ["figma_get_comments", "figma_delete_comment"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: PostCommentInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			const clientMeta = input.node_id
+				? {
+					node_id: input.node_id,
+					node_offset: {
+						x: input.x ?? 0,
+						y: input.y ?? 0,
+					},
+				}
+				: undefined;
+			const result = await api.postComment(
+				fileKey,
+				input.message,
+				clientMeta,
+				input.reply_to_comment_id,
+			);
+
+			return {
+				success: true,
+				fileKey,
+				fileUrl: targetUrl,
+				comment: {
+					id: result.id,
+					message: result.message,
+					created_at: result.created_at,
+					user: result.user,
+					client_meta: result.client_meta,
+					order_id: result.order_id,
+				},
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const deleteCommentTool: ToolDefinition<DeleteCommentInput, any> = {
+		name: "figma_delete_comment",
+		summary: "Delete a comment from a Figma file.",
+		description:
+			"Registry-backed comments write tool for HTTP/CLI. Deletes a comment through the Figma REST API using its comment ID.",
+		tags: ["figma", "comments", "review", "collaboration", "write"],
+		discoveryGroup: "comments",
+		inputSchema: deleteCommentInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "small",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Delete a comment by ID",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					comment_id: "74382910",
+				},
+			},
+		],
+		relatedTools: ["figma_get_comments", "figma_post_comment"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: DeleteCommentInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			await api.deleteComment(fileKey, input.comment_id);
+
+			return {
+				success: true,
+				fileKey,
+				fileUrl: targetUrl,
+				deletedCommentId: input.comment_id,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	return normalizeToolDefinitions([
 		executeTool,
 		updateVariableTool,
@@ -1682,5 +1849,7 @@ return {
 		setImageFillTool,
 		editComponentPropertyTool,
 		deleteComponentPropertyTool,
+		postCommentTool,
+		deleteCommentTool,
 	]);
 }
