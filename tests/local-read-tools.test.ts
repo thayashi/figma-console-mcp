@@ -19,12 +19,15 @@ describe("Local Read Tool Definitions", () => {
 		expect(readToolNames.has("figma_check_design_parity")).toBe(true);
 		expect(readToolNames.has("figma_capture_screenshot")).toBe(true);
 		expect(readToolNames.has("figma_get_component_details")).toBe(true);
+		expect(readToolNames.has("figma_get_component")).toBe(true);
 		expect(readToolNames.has("figma_get_library_components")).toBe(true);
+		expect(readToolNames.has("figma_get_design_system_kit")).toBe(true);
 		expect(readToolNames.has("figma_get_design_system_summary")).toBe(true);
 		expect(readToolNames.has("figma_get_token_values")).toBe(true);
 		expect(readToolNames.has("figma_get_styles")).toBe(true);
 		expect(readToolNames.has("figma_get_component_image")).toBe(true);
 		expect(readToolNames.has("figma_get_component_for_development")).toBe(true);
+		expect(readToolNames.has("figma_generate_component_doc")).toBe(true);
 		expect(readToolNames.has("figma_get_status")).toBe(true);
 		expect(readToolNames.has("figma_get_selection")).toBe(true);
 		expect(readToolNames.has("figma_list_open_files")).toBe(true);
@@ -385,6 +388,76 @@ describe("Local Read Tool Definitions", () => {
 		expect(result.type).toBe("componentSet");
 		expect(result.component.variantAxes[0].name).toBe("Size");
 		expect(result.instantiation.example).toContain("variant-key");
+	});
+
+	it("get component tool returns REST metadata by default", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_component");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getComponentData: jest.fn().mockResolvedValue({
+				document: {
+					id: "10:20",
+					name: "Button",
+					type: "COMPONENT",
+					description: "Primary action button",
+					componentPropertyDefinitions: { Label: { type: "TEXT" } },
+					children: [{ id: "10:21", name: "Label", type: "TEXT" }],
+					absoluteBoundingBox: { x: 0, y: 0, width: 120, height: 40 },
+					fills: [{ type: "SOLID" }],
+					strokes: [],
+					effects: [],
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+					getDesktopConnector: async () => {
+						throw new Error("plugin unavailable");
+					},
+				},
+			} as any,
+			{ nodeId: "10:20" },
+		);
+
+		expect(api.getComponentData).toHaveBeenCalledWith("abc123", "10:20");
+		expect(result.source).toBe("rest_api");
+		expect(result.component.name).toBe("Button");
+		expect(result.component.properties.Label.type).toBe("TEXT");
+	});
+
+	it("get component tool returns reconstruction spec", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_component");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getComponentData: jest.fn().mockResolvedValue({
+				document: {
+					id: "10:20",
+					name: "Badge",
+					type: "COMPONENT",
+					absoluteBoundingBox: { width: 80, height: 24 },
+					children: [],
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{ nodeId: "10:20", format: "reconstruction" },
+		);
+
+		expect(result.name).toBe("Badge");
+		expect(result.type).toBe("COMPONENT");
 	});
 
 	it("get component details tool returns published library variant details", async () => {
@@ -761,6 +834,109 @@ describe("Local Read Tool Definitions", () => {
 			componentProperties: { Label: { type: "TEXT", value: "Save" } },
 		});
 		expect(result.component.pluginData).toBeUndefined();
+	});
+
+	it("generate component doc tool returns markdown and chunks", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_generate_component_doc");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getNodes: jest.fn().mockResolvedValue({
+				nodes: {
+					"10:20": {
+						document: {
+							id: "10:20",
+							name: "Button",
+							type: "COMPONENT",
+							description: "Primary action button",
+							style: { fontFamily: "Inter", fontWeight: 600, fontSize: 14, lineHeightPx: 20 },
+							children: [
+								{ id: "10:21", name: "Label", type: "TEXT", characters: "Save", style: { fontFamily: "Inter", fontWeight: 600, fontSize: 14, lineHeightPx: 20 } },
+							],
+						},
+					},
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{ nodeId: "10:20", includeFrontmatter: true },
+		);
+
+		expect(result.componentName).toBe("Button");
+		expect(result.markdown).toContain("## Overview");
+		expect(result.markdown).toContain("## Anatomy");
+		expect(result.chunks.length).toBeGreaterThan(0);
+	});
+
+	it("get design system kit tool aggregates tokens, components, and styles", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_design_system_kit");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getLocalVariables: jest.fn().mockResolvedValue({
+				variableCollections: {
+					"col-1": { name: "Primitives", modes: [{ modeId: "1:0", name: "Light" }], variableIds: ["var-1"] },
+				},
+				variables: {
+					"var-1": { name: "color/primary", resolvedType: "COLOR", valuesByMode: { "1:0": "#FF0000" }, variableCollectionId: "col-1" },
+				},
+			}),
+			getComponents: jest.fn().mockResolvedValue({
+				meta: {
+					components: [{ name: "Icon", key: "comp-key", node_id: "2:2", description: "Standalone icon" }],
+				},
+			}),
+			getComponentSets: jest.fn().mockResolvedValue({
+				meta: {
+					component_sets: [{ name: "Button", key: "set-key", node_id: "2:1", description: "Button set" }],
+				},
+			}),
+			getNodes: jest.fn().mockImplementation(async (_fileKey: string, ids: string[]) => ({
+				nodes: Object.fromEntries(ids.map((id) => [id, {
+					document: id === "2:1"
+						? {
+							id,
+							name: "Button",
+							type: "COMPONENT_SET",
+							componentPropertyDefinitions: { Size: { type: "VARIANT" } },
+							children: [{ id: "2:3", name: "Size=md", type: "COMPONENT", fills: [{ type: "SOLID", color: { r: 1, g: 0, b: 0 } }] }],
+						}
+						: {
+							id,
+							name: "Icon",
+							type: "COMPONENT",
+						},
+				}])),
+			})),
+			getStyles: jest.fn().mockResolvedValue({
+				meta: {
+					styles: [{ key: "style-1", name: "Color/Primary", style_type: "FILL", node_id: "5:1" }],
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+					getVariablesCache: () => new Map(),
+				},
+			} as any,
+			{},
+		);
+
+		expect(result.fileKey).toBe("abc123");
+		expect(result.tokens.summary.totalVariables).toBe(1);
+		expect(result.components.summary.totalComponentSets).toBe(1);
+		expect(result.styles.summary.totalStyles).toBe(1);
 	});
 
 	it("get design changes tool returns buffered events and clears when requested", async () => {
