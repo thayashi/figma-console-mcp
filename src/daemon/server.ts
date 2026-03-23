@@ -90,7 +90,6 @@ async function main(): Promise<void> {
 				});
 		});
 
-		process.stdin.resume();
 		return;
 	}
 
