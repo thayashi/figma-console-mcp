@@ -5,6 +5,7 @@ import { LocalDaemonRuntime } from "./local-runtime.js";
 import { clearHttpDiscovery, writeHttpDiscovery } from "./http-discovery.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createLocalReadToolDefinitions } from "../tools/catalog/local-read-tools.js";
+import { createLocalWriteToolDefinitions } from "../tools/catalog/local-write-tools.js";
 import { runCli } from "../transports/cli/main.js";
 import { startHttpServer } from "../transports/http/server.js";
 
@@ -16,6 +17,9 @@ async function main(): Promise<void> {
 	const registry = new ToolRegistry();
 
 	for (const definition of createLocalReadToolDefinitions()) {
+		registry.register(definition);
+	}
+	for (const definition of createLocalWriteToolDefinitions()) {
 		registry.register(definition);
 	}
 

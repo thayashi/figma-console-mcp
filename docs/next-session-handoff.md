@@ -102,16 +102,50 @@ This means the registry-backed `figma_check_design_parity` now includes:
 
 ### Registry-backed tools currently implemented
 
-All currently live in:
+Catalog files:
 
-- [src/tools/catalog/local-read-tools.ts](/home/toshi/dev/figma-console-mcp/src/tools/catalog/local-read-tools.ts)
+- read/runtime tools:
+  - [src/tools/catalog/local-read-tools.ts](/home/toshi/dev/figma-console-mcp/src/tools/catalog/local-read-tools.ts)
+- write tools:
+  - [src/tools/catalog/local-write-tools.ts](/home/toshi/dev/figma-console-mcp/src/tools/catalog/local-write-tools.ts)
 
-Implemented registry-backed tools:
+Implemented registry-backed read/runtime tools:
 
 - `figma_get_variables`
 - `figma_search_components`
+- `figma_get_component_details`
+- `figma_get_library_components`
+- `figma_get_design_system_summary`
+- `figma_get_token_values`
+- `figma_get_component_image`
 - `figma_check_design_parity`
+- `figma_get_status`
+- `figma_get_selection`
+- `figma_list_open_files`
+- `figma_get_file_data`
+- `figma_get_design_changes`
+- `figma_get_console_logs`
+- `figma_clear_console`
+- `figma_watch_console`
+- `figma_reconnect`
+- `figma_reload_plugin`
+- `figma_capture_screenshot`
+- `figma_lint_design`
+
+Implemented registry-backed write tools:
+
 - `figma_execute`
+- `figma_update_variable`
+- `figma_create_variable`
+- `figma_create_variable_collection`
+- `figma_delete_variable`
+- `figma_delete_variable_collection`
+- `figma_rename_variable`
+- `figma_add_mode`
+- `figma_rename_mode`
+- `figma_batch_create_variables`
+- `figma_batch_update_variables`
+- `figma_setup_design_tokens`
 - `figma_instantiate_component`
 - `figma_set_instance_properties`
 - `figma_add_component_property`
@@ -130,27 +164,32 @@ Implemented registry-backed tools:
 - `figma_set_text_content`
 - `figma_create_child`
 - `figma_set_image_fill`
-- `figma_capture_screenshot`
-- `figma_lint_design`
-
-Important note:
-
-- despite the filename, `local-read-tools.ts` now contains both read and write tools
-- this is the main cleanup target for the next session
 
 ### Tests added
 
 Added registry-focused regression tests in:
 
 - [tests/local-read-tools.test.ts](/home/toshi/dev/figma-console-mcp/tests/local-read-tools.test.ts)
+- [tests/cli-help.test.ts](/home/toshi/dev/figma-console-mcp/tests/cli-help.test.ts)
+- [tests/http-help.test.ts](/home/toshi/dev/figma-console-mcp/tests/http-help.test.ts)
+- [tests/tool-registry.test.ts](/home/toshi/dev/figma-console-mcp/tests/tool-registry.test.ts)
+- [tests/cli-main.test.ts](/home/toshi/dev/figma-console-mcp/tests/cli-main.test.ts)
 
 Current coverage in that file includes:
 
-- parity schema regression
-- parity handler regression
-- component write tools
-- node manipulation tools
-- validation tools
+- catalog split regression
+- runtime/read tool regression
+- variable management tool regression
+- component write tool regression
+- node manipulation tool regression
+- validation and parity regression
+
+Additional current coverage includes:
+
+- CLI help formatting / grouping regression
+- HTTP help document regression
+- registry descriptor normalization regression
+- CLI error-path regression
 
 ### Package / build changes
 
@@ -192,7 +231,7 @@ Important:
 Verified command:
 
 ```bash
-TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts
+TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
 ```
 
 Important:
@@ -228,6 +267,8 @@ Observed fallback examples during testing:
 
 Verified:
 
+- `tools list` uses the running daemon HTTP path
+- `tools show` uses the running daemon HTTP path
 - `daemon status` uses the running daemon when the discovery file points to it
 - `invoke figma_execute` uses daemon HTTP path and returns structured results
 - daemon can be started with `FIGMA_ACCESS_TOKEN` and then used over HTTP/CLI
@@ -272,45 +313,35 @@ Implemented routes:
 
 ## Known Limitations
 
-- [src/tools/catalog/local-read-tools.ts](/home/toshi/dev/figma-console-mcp/src/tools/catalog/local-read-tools.ts) now mixes read and write tools and should be split
+- catalog split is done and descriptor/discovery cleanup has progressed, but there may still be smaller consistency passes left
 - registry-backed tool coverage is much better than before, but still not fully aligned with the full MCP tool surface
-- CLI still mixes registry-local discovery for some commands and daemon-first behavior for execution/status
+- CLI is now daemon-first for `tools list`, `tools show`, `invoke`, and `daemon status`
+- `figma_navigate` is still intentionally left outside the daemon-first registry surface because it is browser/CDP-oriented rather than runtime/registry-oriented
 - no formal project skill/config loading yet
-- no separate `local-write-tools.ts` catalog yet
-- no cleanup pass yet on descriptor organization / discovery grouping after the large tool expansion
+- some docs still describe the older/local surface more than the daemon-first CLI/HTTP surface
 
 ## Most Important Next Steps
 
-### 1. Split read and write catalogs
+### 1. Update docs/handoff and daemon-first usage guidance
 
-Primary target:
+Current code state is ahead of the handoff/docs that existed at the start of this session.
 
-- [src/tools/catalog/local-read-tools.ts](/home/toshi/dev/figma-console-mcp/src/tools/catalog/local-read-tools.ts)
+Highest-value follow-up:
 
-Next step:
+- refresh docs that still assume the older local/MCP-first surface
+- document the current discovery groups and CLI/HTTP exploration flow
+- decide whether `figma_take_screenshot` should remain separate from the newer screenshot/image surfaces
 
-- move write-oriented tools into a new file, likely `src/tools/catalog/local-write-tools.ts`
-- keep read/analysis tools in `local-read-tools.ts`
-- update daemon registration to include both catalogs
+### 2. Continue closing remaining daemon-first surface gaps
 
-This is the most important cleanup now.
+Read/discovery backlog from the previous handoff is now covered, but there may still be non-read MCP tools that have not been mapped into the registry-backed daemon surface.
 
-### 2. Continue filling daemon-first tool surface gaps
+Likely next gap analysis areas:
 
-After catalog split:
+- compare registry-backed tool coverage against the broader MCP/local tool set
+- identify any remaining daemon-first omissions outside the intentionally excluded browser/CDP-oriented tools
 
-- compare the registry-backed tool set against the existing MCP/local tool surface
-- migrate additional high-value tools if important gaps remain
-
-### 3. Clean up CLI daemon-first behavior further
-
-The current state is workable, but the daemon-first path should become the unambiguous primary path for:
-
-- `daemon status`
-- `invoke`
-- eventually `tools show`
-
-### 4. Future phase, not yet implemented
+### 3. Future phase, not yet implemented
 
 Project-specific skill/config layering:
 
@@ -328,7 +359,7 @@ PATH="$HOME/.volta/bin:$PATH" npm run build:local
 ### Targeted tests
 
 ```bash
-TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts
+TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
 ```
 
 ### Start daemon
@@ -386,9 +417,11 @@ Read docs/next-session-handoff.md first, then continue on branch daemon-cli-http
 Current status:
 - parity implementation is shared between MCP and registry tools
 - daemon shutdown and stdin EIO fixes are committed
-- registry-backed component write tools and node manipulation/validation tools are added
+- registry-backed component write tools, variable tools, runtime/read tools, node manipulation/validation tools, and read/discovery backlog tools are added
+- local tool catalogs are split into read and write modules and daemon registration loads both
+- CLI tool grouping, tool details/help guidance, registry descriptor normalization, and CLI error handling have been cleaned up
 Next priority:
-- split src/tools/catalog/local-read-tools.ts into read/write catalogs
+- refresh docs/handoff and compare daemon-first registry coverage against the remaining broader MCP/local tool surface
 - keep daemon-first architecture direction
 - do not merge to main yet
 ```

@@ -5,7 +5,14 @@ import type { IFigmaConnector } from "../core/figma-connector.js";
 import { DEFAULT_WS_PORT, HEARTBEAT_INTERVAL_MS, advertisePort, cleanupOrphanedProcesses, cleanupStalePortFiles, getPortRange, refreshPortAdvertisement, registerPortCleanup, unadvertisePort } from "../core/port-discovery.js";
 import { FigmaWebSocketServer } from "../core/websocket-server.js";
 import { WebSocketConnector } from "../core/websocket-connector.js";
-import type { FigmaRuntime, RuntimeStatus } from "./runtime.js";
+import type {
+	FigmaRuntime,
+	RuntimeConnectedFile,
+	RuntimeConsoleStatus,
+	RuntimeDocumentChange,
+	RuntimeSelection,
+	RuntimeStatus,
+} from "./runtime.js";
 
 const logger = createChildLogger({ component: "daemon-runtime" });
 
@@ -157,6 +164,111 @@ export class LocalDaemonRuntime implements FigmaRuntime {
 
 	getConsoleMonitor(): ConsoleMonitor | null {
 		return null;
+	}
+
+	getCurrentSelection(): RuntimeSelection | null {
+		const selection = this.wsServer?.getCurrentSelection() || null;
+		if (!selection) {
+			return null;
+		}
+
+		return {
+			nodes: selection.nodes.map((node) => ({
+				id: node.id,
+				name: node.name,
+				type: node.type,
+				width: node.width,
+				height: node.height,
+			})),
+			count: selection.count,
+			page: selection.page,
+			timestamp: selection.timestamp,
+		};
+	}
+
+	getConnectedFiles(): RuntimeConnectedFile[] {
+		return (this.wsServer?.getConnectedFiles() || []).map((file) => ({
+			fileName: file.fileName,
+			fileKey: file.fileKey,
+			currentPage: file.currentPage,
+			currentPageId: file.currentPageId,
+			connectedAt: file.connectedAt,
+			isActive: file.isActive,
+		}));
+	}
+
+	getDocumentChanges(options?: { count?: number; since?: number }): RuntimeDocumentChange[] {
+		return (this.wsServer?.getDocumentChanges(options) || []).map((entry) => ({
+			hasStyleChanges: entry.hasStyleChanges,
+			hasNodeChanges: entry.hasNodeChanges,
+			changedNodeIds: [...entry.changedNodeIds],
+			changeCount: entry.changeCount,
+			timestamp: entry.timestamp,
+		}));
+	}
+
+	clearDocumentChanges(): number {
+		return this.wsServer?.clearDocumentChanges() || 0;
+	}
+
+	getConsoleLogs(options?: { count?: number; level?: "log" | "info" | "warn" | "error" | "debug" | "all"; since?: number }) {
+		return [...(this.wsServer?.getConsoleLogs(options) || [])];
+	}
+
+	clearConsoleLogs(): number {
+		return this.wsServer?.clearConsoleLogs() || 0;
+	}
+
+	getConsoleStatus(): RuntimeConsoleStatus | null {
+		const status = this.wsServer?.getConsoleStatus();
+		if (!status) {
+			return null;
+		}
+
+		return {
+			isMonitoring: status.isMonitoring,
+			anyClientConnected: status.anyClientConnected,
+			logCount: status.logCount,
+			bufferSize: status.bufferSize,
+			workerCount: status.workerCount,
+			oldestTimestamp: status.oldestTimestamp,
+			newestTimestamp: status.newestTimestamp,
+		};
+	}
+
+	async reconnect(): Promise<RuntimeStatus> {
+		this.connector = null;
+		await this.start();
+		await this.getDesktopConnector();
+		return this.getStatus();
+	}
+
+	async reloadPluginUi(options?: { clearConsole?: boolean }): Promise<{
+		status: "reloaded";
+		transport: "websocket";
+		consoleCleared: boolean;
+		clearedCount: number;
+		timestamp: number;
+	}> {
+		await this.start();
+		if (!this.wsServer?.isClientConnected()) {
+			throw new Error("No WebSocket client connected. Make sure the Desktop Bridge plugin is open in Figma.");
+		}
+
+		const clearConsole = options?.clearConsole ?? true;
+		const clearedCount = clearConsole ? this.wsServer.clearConsoleLogs() : 0;
+		await this.wsServer.sendCommand("RELOAD_UI", {}, 10000);
+		await new Promise((resolve) => setTimeout(resolve, 3000));
+
+		this.connector = null;
+
+		return {
+			status: "reloaded",
+			transport: "websocket",
+			consoleCleared: clearConsole,
+			clearedCount,
+			timestamp: Date.now(),
+		};
 	}
 
 	getWsPort(): number | null {

@@ -7,6 +7,17 @@ export interface CliHttpTarget {
 	baseUrl: string;
 }
 
+export type FetchToolDetailsResult = ToolDescriptor | "NOT_FOUND" | null;
+export type InvokeToolViaDaemonResult =
+	| ToolExecutionResult
+	| "NOT_FOUND"
+	| {
+			kind: "HTTP_ERROR";
+			status: number;
+			body: unknown;
+	  }
+	| null;
+
 export function getCliHttpTargets(): CliHttpTarget[] {
 	const host = process.env.FIGMA_HTTP_HOST || "127.0.0.1";
 	const preferredPort = parseInt(process.env.FIGMA_HTTP_PORT || "3847", 10);
@@ -49,10 +60,26 @@ export async function fetchDaemonStatus(): Promise<unknown | null> {
 	return null;
 }
 
-export async function fetchToolDetails(toolName: string): Promise<ToolDescriptor | null> {
+export async function fetchToolList(): Promise<ToolDescriptor[] | null> {
+	for (const target of getCliHttpTargets()) {
+		try {
+			const response = await fetch(`${target.baseUrl}/v1/tools`);
+			if (!response.ok) continue;
+			const data = (await response.json()) as { tools?: ToolDescriptor[] };
+			return data.tools || [];
+		} catch {
+			continue;
+		}
+	}
+
+	return null;
+}
+
+export async function fetchToolDetails(toolName: string): Promise<FetchToolDetailsResult> {
 	for (const target of getCliHttpTargets()) {
 		try {
 			const response = await fetch(`${target.baseUrl}/v1/tools/${encodeURIComponent(toolName)}`);
+			if (response.status === 404) return "NOT_FOUND";
 			if (!response.ok) continue;
 			return (await response.json()) as ToolDescriptor;
 		} catch {
@@ -66,7 +93,7 @@ export async function fetchToolDetails(toolName: string): Promise<ToolDescriptor
 export async function invokeToolViaDaemon(
 	toolName: string,
 	input: unknown,
-): Promise<ToolExecutionResult | null> {
+): Promise<InvokeToolViaDaemonResult> {
 	for (const target of getCliHttpTargets()) {
 		try {
 			const response = await fetch(`${target.baseUrl}/v1/tools/${encodeURIComponent(toolName)}`, {
@@ -76,8 +103,18 @@ export async function invokeToolViaDaemon(
 				},
 				body: JSON.stringify({ input }),
 			});
-			const data = (await response.json()) as ToolExecutionResult;
-			return data;
+			const data = await response.json();
+			if (response.status === 404) {
+				return "NOT_FOUND";
+			}
+			if (!response.ok) {
+				return {
+					kind: "HTTP_ERROR",
+					status: response.status,
+					body: data,
+				};
+			}
+			return data as ToolExecutionResult;
 		} catch {
 			continue;
 		}

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import type { FigmaRuntime } from "../../daemon/runtime.js";
 import { createToolContext, type ToolRegistry } from "../../tools/registry.js";
-import type { ToolInvokeOptions } from "../../tools/types.js";
+import type { ToolDescriptor, ToolInvokeOptions } from "../../tools/types.js";
 
 export interface HttpServerOptions {
 	host?: string;
@@ -180,24 +180,90 @@ function buildOpenApiDocument(registry: ToolRegistry): unknown {
 	};
 }
 
-function buildHelpDocument(registry: ToolRegistry): unknown {
-	const toolNames = registry.describeAll().map((tool) => tool.name);
+export function buildHelpDocument(registry: ToolRegistry): unknown {
+	const tools = registry.describeAll();
+	const toolNames = tools.map((tool) => tool.name);
+	const groupedTools = buildHelpGroups(tools);
 
 	return {
 		service: "Figma Console Local API",
 		version: "0.1.0",
+		audience: "Agents and scripts exploring daemon-first Figma workflows over localhost HTTP.",
 		discoveryFlow: [
-			"Call GET /v1/tools to list available tools.",
-			"Call GET /v1/tools/:name to inspect schema, examples, and capability flags.",
-			"Call POST /v1/tools/:name with an input object to execute a tool.",
+			"Call GET /v1/status first when you need to know whether a Desktop Bridge connection is active.",
+			"Call GET /v1/tools to browse the tool surface grouped by workflow area.",
+			"Call GET /v1/tools/:name before invoking a tool so you can inspect schema, examples, transport support, and prerequisites.",
+			"Call POST /v1/tools/:name with an input object only after you have narrowed the file, node, or component target.",
 		],
-		recommendations: [
-			"Start with read-only discovery tools before write tools.",
-			"Prefer the active Desktop Bridge file when available for plugin-backed reads.",
-			"Use specific file URLs or library file keys for cross-file REST access.",
+		recommendations: {
+			startingPoints: [
+				"For runtime awareness, start with figma_get_status, figma_get_selection, or figma_list_open_files.",
+				"For design-system discovery, start with figma_get_design_system_summary, figma_get_variables, or figma_search_components.",
+				"For document inspection, start with figma_get_file_data before node-targeted writes.",
+			],
+			readVsWrite: [
+				"Prefer read and analysis tools first to confirm identifiers, current state, and prerequisites.",
+				"Use write tools only after confirming the target node, component, variable, or collection.",
+			],
+			prerequisites: [
+				"Plugin-backed tools require the Desktop Bridge plugin to be open in the target Figma file.",
+				"REST-backed tools require REST authentication, typically FIGMA_ACCESS_TOKEN in local mode.",
+				"For cross-file library access, pass a file URL or library file key instead of relying on the active file.",
+			],
+			visualValidation: [
+				"Use figma_capture_screenshot after writes when you need current plugin runtime state.",
+				"Use figma_get_component_image when you need a stable REST-rendered reference image for an existing node.",
+			],
+			fallbacks: [
+				"If a high-level tool is insufficient, use figma_execute as the lowest-level Plugin API escape hatch.",
+			],
+		},
+		workflows: [
+			{
+				name: "Discover Then Edit",
+				steps: [
+					"Check daemon/runtime state.",
+					"Find the target file, node, component, or variable with read tools.",
+					"Inspect the specific tool schema.",
+					"Invoke one write tool with focused input.",
+					"Validate with screenshot, logs, or parity/lint tools.",
+				],
+			},
+			{
+				name: "Cross-File Library Access",
+				steps: [
+					"Use a REST-authenticated tool with a library file key or URL.",
+					"Search or inspect the library component.",
+					"Use a concrete component or variant key for instantiation.",
+				],
+			},
+		],
+		groupedTools,
+		decisionHints: [
+			{
+				question: "Need current plugin state or active selection?",
+				use: ["figma_get_status", "figma_get_selection", "figma_list_open_files"],
+			},
+			{
+				question: "Need component, token, or library discovery?",
+				use: ["figma_get_design_system_summary", "figma_search_components", "figma_get_component_details"],
+			},
+			{
+				question: "Need visual or quality validation after a change?",
+				use: ["figma_capture_screenshot", "figma_lint_design", "figma_check_design_parity"],
+			},
+		],
+		invokeNotes: [
+			"Unknown or missing fields will fail schema validation at invoke time.",
+			"Most tools expect a compact input object rather than free-form text.",
+			"Use examples from GET /v1/tools/:name as the canonical invocation shape.",
 		],
 		toolNames,
 		examples: {
+			status: {
+				method: "GET",
+				path: "/v1/status",
+			},
 			listTools: {
 				method: "GET",
 				path: "/v1/tools",
@@ -218,4 +284,22 @@ function buildHelpDocument(registry: ToolRegistry): unknown {
 			},
 		},
 	};
+}
+
+function buildHelpGroups(tools: ToolDescriptor[]) {
+	const grouped = new Map<string, string[]>();
+
+	for (const tool of tools) {
+		const names = grouped.get(tool.discoveryGroup) || [];
+		names.push(tool.name);
+		grouped.set(tool.discoveryGroup, names);
+	}
+
+	return Array.from(grouped.entries())
+		.sort((a, b) => a[0].localeCompare(b[0]))
+		.map(([group, names]) => ({
+			group,
+			toolCount: names.length,
+			tools: names.sort(),
+		}));
 }

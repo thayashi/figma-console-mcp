@@ -115,7 +115,7 @@ export function createToolContext(
 export function serializeToolDefinition(
 	definition: ToolDefinition<any, any>,
 ): ToolDescriptor {
-	return {
+	return normalizeToolDescriptor({
 		name: definition.name,
 		summary: definition.summary,
 		description: definition.description,
@@ -133,7 +133,75 @@ export function serializeToolDefinition(
 					name: `${definition.name}Output`,
 				})
 			: undefined,
+	});
+}
+
+export function normalizeToolDescriptor(descriptor: ToolDescriptor): ToolDescriptor {
+	return {
+		...descriptor,
+		summary: normalizeSentence(descriptor.summary),
+		description: descriptor.description.trim().replace(/\s+/g, " "),
+		tags: normalizeStrings(descriptor.tags, { prioritize: "figma" }),
+		discoveryGroup: descriptor.discoveryGroup.trim(),
+		capabilities: {
+			requiresPlugin: descriptor.capabilities.requiresPlugin ?? false,
+			requiresRestToken: descriptor.capabilities.requiresRestToken ?? false,
+			supportsHttp: descriptor.capabilities.supportsHttp ?? false,
+			supportsCli: descriptor.capabilities.supportsCli ?? false,
+			supportsMcp: descriptor.capabilities.supportsMcp ?? false,
+			responseShape: descriptor.capabilities.responseShape ?? "medium",
+			sideEffects: descriptor.capabilities.sideEffects ?? "none",
+		},
+		examples: [...(descriptor.examples || [])].map((example) => ({
+			...example,
+			title: normalizeSentence(example.title),
+			notes: example.notes?.trim(),
+		})).sort((a, b) => a.title.localeCompare(b.title)),
+		relatedTools: normalizeStrings(descriptor.relatedTools || []).sort((a, b) => a.localeCompare(b)),
+		commonErrors: [...(descriptor.commonErrors || [])]
+			.map((error) => ({
+				...error,
+				code: error.code.trim(),
+				message: normalizeSentence(error.message),
+				hint: error.hint?.trim(),
+			}))
+			.sort((a, b) => a.code.localeCompare(b.code)),
 	};
+}
+
+function normalizeSentence(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return trimmed;
+	}
+	if (/[.!?]$/.test(trimmed)) {
+		return trimmed;
+	}
+	return `${trimmed}.`;
+}
+
+function normalizeStrings(values: string[], options?: { prioritize?: string }): string[] {
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+
+	for (const value of values) {
+		const trimmed = value.trim();
+		if (!trimmed || seen.has(trimmed)) {
+			continue;
+		}
+		seen.add(trimmed);
+		normalized.push(trimmed);
+	}
+
+	if (options?.prioritize) {
+		const index = normalized.indexOf(options.prioritize);
+		if (index > 0) {
+			normalized.splice(index, 1);
+			normalized.unshift(options.prioritize);
+		}
+	}
+
+	return normalized;
 }
 
 function toFailureResult(
