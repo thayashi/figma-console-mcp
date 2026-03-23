@@ -113,16 +113,23 @@ Implemented registry-backed read/runtime tools:
 
 - `figma_get_variables`
 - `figma_search_components`
+- `figma_get_component`
 - `figma_get_component_details`
+- `figma_get_component_for_development`
+- `figma_get_design_system_kit`
 - `figma_get_library_components`
 - `figma_get_design_system_summary`
 - `figma_get_token_values`
+- `figma_get_styles`
 - `figma_get_component_image`
+- `figma_generate_component_doc`
 - `figma_check_design_parity`
 - `figma_get_status`
 - `figma_get_selection`
 - `figma_list_open_files`
+- `figma_get_comments`
 - `figma_get_file_data`
+- `figma_get_file_for_plugin`
 - `figma_get_design_changes`
 - `figma_get_console_logs`
 - `figma_clear_console`
@@ -164,6 +171,8 @@ Implemented registry-backed write tools:
 - `figma_set_text_content`
 - `figma_create_child`
 - `figma_set_image_fill`
+- `figma_post_comment`
+- `figma_delete_comment`
 
 ### Tests added
 
@@ -179,6 +188,7 @@ Current coverage in that file includes:
 
 - catalog split regression
 - runtime/read tool regression
+- aggregate/doc tool regression
 - variable management tool regression
 - component write tool regression
 - node manipulation tool regression
@@ -200,14 +210,14 @@ Additional current coverage includes:
 - Extended local TS build includes:
   - [tsconfig.local.json](/home/toshi/dev/figma-console-mcp/tsconfig.local.json)
 
-## Commits Added In This Session
+## Recent Branch Commits
 
-- `2c47c19` `Handle daemon shutdown on signals`
-- `d41709f` `Avoid stdin EIO in daemon start`
-- `37a272f` `Share parity implementation between MCP and registry tools`
-- `ed44de4` `Add regression tests for registry-backed parity tool`
-- `9d7ba5d` `Add registry-backed component write tools`
-- `d0c0e0c` `Add registry-backed node manipulation and validation tools`
+- `04d5d14` `Add registry-backed component and kit docs`
+- `2802d8e` `Add registry-backed component development read`
+- `b9e6cbd` `Add registry-backed style and plugin file reads`
+- `20975d9` `Add registry-backed comment tools`
+- `1801109` `Document daemon-first tool coverage gaps`
+- `5a00587` `Expand daemon-first registry tool surface`
 
 ## What Has Been Verified
 
@@ -314,32 +324,36 @@ Implemented routes:
 ## Known Limitations
 
 - catalog split is done and descriptor/discovery cleanup has progressed, but there may still be smaller consistency passes left
-- registry-backed tool coverage is much better than before, but still not fully aligned with the full MCP tool surface
+- registry-backed tool coverage is now near-parity with the broader MCP/local surface
 - CLI is now daemon-first for `tools list`, `tools show`, `invoke`, and `daemon status`
 - `figma_navigate` is still intentionally left outside the daemon-first registry surface because it is browser/CDP-oriented rather than runtime/registry-oriented
+- `figma_pair_plugin` is still intentionally outside the localhost daemon-first surface because it is a cloud relay pairing flow
+- `figma_set_text` and `figma_take_screenshot` are effectively covered by `figma_set_text_content` and `figma_capture_screenshot`
+- the main remaining parity question is whether `figma_arrange_component_set` should be moved into the daemon-first write surface
 - no formal project skill/config loading yet
 - some docs still describe the older/local surface more than the daemon-first CLI/HTTP surface
 
 ## Most Important Next Steps
 
-### 1. Update docs/handoff and daemon-first usage guidance
+### 1. Decide on `figma_arrange_component_set`
 
-Current code state is ahead of the handoff/docs that existed at the start of this session.
+This is the main remaining uncovered tool from the old MCP/local surface that still plausibly belongs in daemon-first.
 
 Highest-value follow-up:
 
+- decide whether its specialized layout/cleanup behavior belongs in the registry-backed write surface
+- if yes, move it into `src/tools/catalog/local-write-tools.ts` and add regression coverage
+- if no, document that it stays legacy-only and why
+
+### 2. Refresh daemon-first docs and usage guidance
+
+Current code state is now ahead of older docs/handoff text in a few places.
+
+Highest-value doc cleanup:
+
 - refresh docs that still assume the older local/MCP-first surface
 - document the current discovery groups and CLI/HTTP exploration flow
-- decide whether `figma_take_screenshot` should remain separate from the newer screenshot/image surfaces
-
-### 2. Continue closing remaining daemon-first surface gaps
-
-Read/discovery backlog from the previous handoff is now covered, but there may still be non-read MCP tools that have not been mapped into the registry-backed daemon surface.
-
-Likely next gap analysis areas:
-
-- compare registry-backed tool coverage against the broader MCP/local tool set
-- identify any remaining daemon-first omissions outside the intentionally excluded browser/CDP-oriented tools
+- note that tool coverage is now near-parity except for intentionally excluded flows and `figma_arrange_component_set`
 
 ### 3. Future phase, not yet implemented
 
@@ -417,11 +431,12 @@ Read docs/next-session-handoff.md first, then continue on branch daemon-cli-http
 Current status:
 - parity implementation is shared between MCP and registry tools
 - daemon shutdown and stdin EIO fixes are committed
-- registry-backed component write tools, variable tools, runtime/read tools, node manipulation/validation tools, and read/discovery backlog tools are added
+- registry-backed read/write coverage now includes comments, styles, plugin-file reads, component metadata/reconstruction, component-for-development, design-system kit, and component-doc generation
 - local tool catalogs are split into read and write modules and daemon registration loads both
 - CLI tool grouping, tool details/help guidance, registry descriptor normalization, and CLI error handling have been cleaned up
+- tool coverage gap analysis is documented in `docs/daemon-tool-coverage.md`
 Next priority:
-- refresh docs/handoff and compare daemon-first registry coverage against the remaining broader MCP/local tool surface
+- decide whether to bring `figma_arrange_component_set` into daemon-first, then refresh docs
 - keep daemon-first architecture direction
 - do not merge to main yet
 ```
