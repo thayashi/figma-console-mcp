@@ -22,12 +22,14 @@ describe("Local Read Tool Definitions", () => {
 		expect(readToolNames.has("figma_get_library_components")).toBe(true);
 		expect(readToolNames.has("figma_get_design_system_summary")).toBe(true);
 		expect(readToolNames.has("figma_get_token_values")).toBe(true);
+		expect(readToolNames.has("figma_get_styles")).toBe(true);
 		expect(readToolNames.has("figma_get_component_image")).toBe(true);
 		expect(readToolNames.has("figma_get_status")).toBe(true);
 		expect(readToolNames.has("figma_get_selection")).toBe(true);
 		expect(readToolNames.has("figma_list_open_files")).toBe(true);
 		expect(readToolNames.has("figma_get_comments")).toBe(true);
 		expect(readToolNames.has("figma_get_file_data")).toBe(true);
+		expect(readToolNames.has("figma_get_file_for_plugin")).toBe(true);
 		expect(readToolNames.has("figma_get_design_changes")).toBe(true);
 		expect(readToolNames.has("figma_get_console_logs")).toBe(true);
 		expect(readToolNames.has("figma_clear_console")).toBe(true);
@@ -232,6 +234,106 @@ describe("Local Read Tool Definitions", () => {
 			type: "CANVAS",
 			children: [],
 		});
+	});
+
+	it("get styles tool fetches and filters styles", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_styles");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getStyles: jest.fn().mockResolvedValue({
+				meta: {
+					styles: [
+						{
+							key: "style-1",
+							name: "Color/Primary",
+							description: "Primary brand color",
+							style_type: "FILL",
+							remote: true,
+							extra: "ignored-in-standard",
+						},
+					],
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{ verbosity: "standard" },
+		);
+
+		expect(api.getStyles).toHaveBeenCalledWith("abc123");
+		expect(result.fileKey).toBe("abc123");
+		expect(result.totalStyles).toBe(1);
+		expect(result.styles[0]).toEqual({
+			key: "style-1",
+			name: "Color/Primary",
+			description: "Primary brand color",
+			style_type: "FILL",
+			remote: true,
+		});
+	});
+
+	it("get file for plugin tool filters file data to plugin-relevant fields", async () => {
+		const tool = createReadToolDefinitions().find((candidate) => candidate.name === "figma_get_file_for_plugin");
+		expect(tool).toBeDefined();
+
+		const api = {
+			getFile: jest.fn().mockResolvedValue({
+				name: "Plugin File",
+				lastModified: "2026-03-22T00:00:00Z",
+				version: "456",
+				document: {
+					id: "0:0",
+					name: "Document",
+					type: "DOCUMENT",
+					children: [
+						{
+							id: "1:1",
+							name: "Frame",
+							type: "FRAME",
+							visible: true,
+							absoluteBoundingBox: { x: 10, y: 20, width: 300, height: 200 },
+							pluginData: { token: "abc" },
+							fills: [{ type: "SOLID" }],
+							children: [],
+						},
+					],
+				},
+				components: { comp1: {} },
+				styles: { style1: {} },
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getCurrentFileUrl: () => "https://www.figma.com/design/abc123/Design-System",
+					getFigmaAPI: async () => api,
+				},
+			} as any,
+			{ depth: 2 },
+		);
+
+		expect(api.getFile).toHaveBeenCalledWith("abc123", { depth: 2, ids: undefined });
+		expect(result.fileKey).toBe("abc123");
+		expect(result.metadata.purpose).toBe("plugin_development");
+		expect(result.document.children[0]).toEqual({
+			id: "1:1",
+			name: "Frame",
+			type: "FRAME",
+			visible: true,
+			bounds: { x: 10, y: 20, width: 300, height: 200 },
+			pluginData: { token: "abc" },
+			children: [],
+		});
+		expect(result.components).toBe(1);
+		expect(result.styles).toBe(1);
 	});
 
 	it("get component details tool returns local component set details", async () => {

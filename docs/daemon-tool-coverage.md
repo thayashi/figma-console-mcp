@@ -21,9 +21,9 @@ Compared sources:
 ## Snapshot
 
 - legacy unique tool names: 61
-- daemon-first registry tool names: 53
-- exact name overlap: 50
-- legacy names not present in registry: 11
+- daemon-first registry tool names: 55
+- exact name overlap: 52
+- legacy names not present in registry: 9
 - registry-only names: 3
 
 Registry-only names:
@@ -48,8 +48,6 @@ Legacy tool names that do not currently exist as registry-backed daemon tools:
 - `figma_get_component`
 - `figma_get_component_for_development`
 - `figma_get_design_system_kit`
-- `figma_get_file_for_plugin`
-- `figma_get_styles`
 - `figma_navigate`
 - `figma_pair_plugin`
 - `figma_set_text`
@@ -84,42 +82,25 @@ These are not strong candidates for the runtime/registry layer as currently desi
 - `figma_get_design_system_kit`
   - partially covered by `figma_get_design_system_summary`, `figma_get_token_values`, `figma_get_variables`, `figma_get_library_components`, and `figma_get_component_details`
   - still missing the one-shot combined extraction format
-- `figma_get_file_for_plugin`
-  - partially covered by `figma_get_file_data`
-  - still missing the plugin-development-specific filtered shape and deeper traversal contract
 
 ### Clear Uncovered Gaps
 
 These still look like real daemon-first coverage gaps rather than naming changes:
 
-- styles/design-system REST reads:
-  - `figma_get_styles`
-  - `figma_get_design_system_kit`
 - component/docs workflows:
   - `figma_get_component`
   - `figma_get_component_for_development`
   - `figma_generate_component_doc`
+- design-system aggregate workflow:
+  - `figma_get_design_system_kit`
 - plugin/file structure read:
-  - `figma_get_file_for_plugin`
+- none in this category after adding `figma_get_file_for_plugin`
 - component-set organization write:
   - `figma_arrange_component_set`
 
 ## Recommended Next Pass
 
 ### Priority 1
-
-Add missing REST read tools with clear daemon fit:
-
-- `figma_get_styles`
-- `figma_get_file_for_plugin`
-
-Reason:
-
-- both are read-only
-- both map cleanly to registry handlers
-- they improve parity without introducing transport-specific behavior
-
-### Priority 2
 
 Decide whether to preserve or collapse the higher-level synthesis tools:
 
@@ -133,7 +114,7 @@ Decision needed:
 - preserve legacy tool contracts in the registry, or
 - keep the lower-level daemon tools and explicitly retire these aggregated MCP-era shapes
 
-### Priority 3
+### Priority 1
 
 Evaluate whether `figma_arrange_component_set` belongs in daemon-first.
 

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { ConsoleLogEntry } from "../../core/types/index.js";
 import { extractFigmaUrlInfo, formatVariables } from "../../core/figma-api.js";
+import { EnrichmentService } from "../../core/enrichment/index.js";
+import { createChildLogger } from "../../core/logger.js";
+import type { EnrichmentOptions } from "../../core/types/enriched.js";
 import {
 	createEmptyManifest,
 	DesignSystemManifestCache,
@@ -13,6 +16,9 @@ import { codeSpecSchema, runDesignParityCheck } from "../../core/design-code-too
 import type { CodeSpec } from "../../core/types/design-code.js";
 import { normalizeToolDefinitions } from "./conventions.js";
 import type { ToolDefinition } from "../types.js";
+
+const logger = createChildLogger({ component: "local-read-tools" });
+const enrichmentService = new EnrichmentService(logger);
 
 const variablesInputSchema = z.object({
 	fileUrl: z.string().url().optional(),
@@ -90,6 +96,21 @@ const getFileDataInputSchema = z.object({
 	enrich: z.boolean().optional(),
 });
 
+const getStylesInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	verbosity: z.enum(["summary", "standard", "full"]).optional().default("standard"),
+	enrich: z.boolean().optional(),
+	include_usage: z.boolean().optional(),
+	include_exports: z.boolean().optional(),
+	export_formats: z.array(z.enum(["css", "sass", "tailwind", "typescript", "json"])).optional(),
+});
+
+const getFileForPluginInputSchema = z.object({
+	fileUrl: z.string().url().optional(),
+	depth: z.number().min(0).max(5).optional().default(2),
+	nodeIds: z.array(z.string()).optional(),
+});
+
 const getDesignChangesInputSchema = z.object({
 	since: z.number().optional(),
 	count: z.number().optional(),
@@ -141,6 +162,8 @@ type GetSelectionInput = z.infer<typeof getSelectionInputSchema>;
 type ListOpenFilesInput = z.infer<typeof listOpenFilesInputSchema>;
 type GetCommentsInput = z.infer<typeof getCommentsInputSchema>;
 type GetFileDataInput = z.infer<typeof getFileDataInputSchema>;
+type GetStylesInput = z.infer<typeof getStylesInputSchema>;
+type GetFileForPluginInput = z.infer<typeof getFileForPluginInputSchema>;
 type GetDesignChangesInput = z.infer<typeof getDesignChangesInputSchema>;
 type GetConsoleLogsInput = z.infer<typeof getConsoleLogsInputSchema>;
 type ClearConsoleInput = z.infer<typeof clearConsoleInputSchema>;
@@ -209,6 +232,75 @@ function filterFileNode(node: any, level: "summary" | "standard" | "full"): any 
 	}
 
 	return node;
+}
+
+function filterStyleNode(style: any, level: "summary" | "standard" | "full"): any {
+	if (!style) {
+		return style;
+	}
+
+	if (level === "summary") {
+		return {
+			key: style.key,
+			name: style.name,
+			style_type: style.style_type,
+		};
+	}
+
+	if (level === "standard") {
+		return {
+			key: style.key,
+			name: style.name,
+			description: style.description,
+			style_type: style.style_type,
+			...(style.remote !== undefined && { remote: style.remote }),
+		};
+	}
+
+	return style;
+}
+
+function filterFileNodeForPlugin(node: any): any {
+	if (!node) {
+		return node;
+	}
+
+	const filtered: any = {
+		id: node.id,
+		name: node.name,
+		type: node.type,
+		...(node.description && { description: node.description }),
+		...(node.descriptionMarkdown && { descriptionMarkdown: node.descriptionMarkdown }),
+	};
+
+	if (node.visible !== undefined) filtered.visible = node.visible;
+	if (node.locked) filtered.locked = node.locked;
+	if (node.removed) filtered.removed = node.removed;
+
+	if (node.absoluteBoundingBox) {
+		filtered.bounds = {
+			x: node.absoluteBoundingBox.x,
+			y: node.absoluteBoundingBox.y,
+			width: node.absoluteBoundingBox.width,
+			height: node.absoluteBoundingBox.height,
+		};
+	}
+
+	if (node.pluginData) filtered.pluginData = node.pluginData;
+	if (node.sharedPluginData) filtered.sharedPluginData = node.sharedPluginData;
+	if (node.componentId) filtered.componentId = node.componentId;
+	if (node.mainComponent) filtered.mainComponent = node.mainComponent;
+	if (node.componentPropertyReferences) filtered.componentPropertyReferences = node.componentPropertyReferences;
+	if (node.instanceOf) filtered.instanceOf = node.instanceOf;
+	if (node.exposedInstances) filtered.exposedInstances = node.exposedInstances;
+	if (node.componentProperties) filtered.componentProperties = node.componentProperties;
+	if (node.characters !== undefined) filtered.characters = node.characters;
+
+	if (node.children) {
+		filtered.children = node.children.map((child: any) => filterFileNodeForPlugin(child));
+	}
+
+	return filtered;
 }
 
 export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
@@ -1011,6 +1103,81 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const getStylesTool: ToolDefinition<GetStylesInput, any> = {
+		name: "figma_get_styles",
+		summary: "Read styles from a Figma file.",
+		description:
+			"Registry-backed styles read tool for HTTP/CLI. Reads styles through the Figma REST API with optional enrichment for resolved values, usage, and export examples.",
+		tags: ["figma", "styles", "design-system", "typography", "colors"],
+		discoveryGroup: "design-system",
+		inputSchema: getStylesInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Read styles from the current file",
+				input: {},
+			},
+			{
+				title: "Read styles with code export enrichment",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					enrich: true,
+					export_formats: ["css", "tailwind"],
+				},
+			},
+		],
+		relatedTools: ["figma_get_variables", "figma_get_design_system_summary"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: GetStylesInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+			const verbosity = input.verbosity ?? "standard";
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			const stylesData = await api.getStyles(fileKey);
+			let styles = (stylesData.meta?.styles || []).map((style: any) => filterStyleNode(style, verbosity));
+
+			if (input.enrich) {
+				const enrichmentOptions: EnrichmentOptions = {
+					enrich: true,
+					include_usage: input.include_usage !== false,
+					include_exports: input.include_exports !== false,
+					export_formats: input.export_formats || ["css", "sass", "tailwind", "typescript", "json"],
+				};
+				styles = await enrichmentService.enrichStyles(styles, fileKey, enrichmentOptions);
+			}
+
+			return {
+				fileKey,
+				fileUrl: targetUrl,
+				styles,
+				totalStyles: styles.length,
+				verbosity,
+				enriched: input.enrich ?? false,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	const getFileDataTool: ToolDefinition<GetFileDataInput, any> = {
 		name: "figma_get_file_data",
 		summary: "Get file structure and document tree data from the active or specified file.",
@@ -1070,6 +1237,83 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 					requestedNodes: input.nodeIds,
 					nodes: fileData.nodes,
 				}),
+			};
+		},
+	};
+
+	const getFileForPluginTool: ToolDefinition<GetFileForPluginInput, any> = {
+		name: "figma_get_file_for_plugin",
+		summary: "Read file data optimized for plugin development.",
+		description:
+			"Registry-backed file read tool for HTTP/CLI. Reads file data through the Figma REST API and filters it to plugin-relevant IDs, structure, plugin data, and component relationships.",
+		tags: ["figma", "file", "plugin", "development", "structure"],
+		discoveryGroup: "file",
+		inputSchema: getFileForPluginInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: true,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Read plugin-oriented file structure from the current file",
+				input: {
+					depth: 2,
+				},
+			},
+			{
+				title: "Read specific nodes for plugin development",
+				input: {
+					fileUrl: "https://www.figma.com/design/FILE_KEY/Design-System",
+					nodeIds: ["123:456", "123:789"],
+				},
+			},
+		],
+		relatedTools: ["figma_get_file_data", "figma_get_component_details"],
+		commonErrors: [
+			{
+				code: "REST_AUTH_REQUIRED",
+				message: "Figma REST API authentication is required.",
+				hint: "Set FIGMA_ACCESS_TOKEN for local daemon usage and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: GetFileForPluginInput) => {
+			const currentUrl = runtime.getCurrentFileUrl();
+			const targetUrl = input.fileUrl || currentUrl;
+
+			if (!targetUrl) {
+				throw new Error("No Figma file URL available. Pass fileUrl or connect the Desktop Bridge plugin.");
+			}
+
+			const fileKey = resolveFileKey(targetUrl);
+			const api = await runtime.getFigmaAPI();
+			const fileData = await api.getFile(fileKey, {
+				depth: input.depth,
+				ids: input.nodeIds,
+			});
+
+			return {
+				fileKey,
+				fileUrl: targetUrl,
+				name: fileData.name,
+				lastModified: fileData.lastModified,
+				version: fileData.version,
+				document: filterFileNodeForPlugin(fileData.document),
+				components: fileData.components ? Object.keys(fileData.components).length : 0,
+				styles: fileData.styles ? Object.keys(fileData.styles).length : 0,
+				...(input.nodeIds && {
+					requestedNodes: input.nodeIds,
+					nodes: fileData.nodes,
+				}),
+				metadata: {
+					purpose: "plugin_development",
+					note: "Optimized for plugin development. Contains IDs, structure, plugin data, and component relationships.",
+				},
+				timestamp: Date.now(),
 			};
 		},
 	};
@@ -1421,6 +1665,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		getLibraryComponentsTool,
 		getDesignSystemSummaryTool,
 		getTokenValuesTool,
+		getStylesTool,
 		getComponentImageTool,
 		parityTool,
 		getStatusTool,
@@ -1428,6 +1673,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		listOpenFilesTool,
 		getCommentsTool,
 		getFileDataTool,
+		getFileForPluginTool,
 		getDesignChangesTool,
 		getConsoleLogsTool,
 		clearConsoleTool,
