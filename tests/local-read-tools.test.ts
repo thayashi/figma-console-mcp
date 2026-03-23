@@ -237,6 +237,326 @@ describe("Local Read Tool Definitions", () => {
 		expect(result.node).toMatchObject({ id: "123:456" });
 	});
 
+	it("resize node schema defaults withConstraints to true", () => {
+		const resizeTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_resize_node");
+		expect(resizeTool).toBeDefined();
+
+		const parsed = resizeTool!.inputSchema.parse({
+			nodeId: "123:456",
+			width: 320,
+			height: 120,
+		});
+
+		expect(parsed.withConstraints).toBe(true);
+	});
+
+	it("resize node handler proxies to the desktop connector", async () => {
+		const resizeTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_resize_node");
+		expect(resizeTool).toBeDefined();
+
+		const connector = {
+			resizeNode: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", width: 320, height: 120 },
+			}),
+		};
+
+		const result = await resizeTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", width: 320, height: 120, withConstraints: true },
+		);
+
+		expect(connector.resizeNode).toHaveBeenCalledWith("123:456", 320, 120, true);
+		expect(result.message).toBe("Node resized to 320x120");
+	});
+
+	it("set fills handler proxies to the desktop connector", async () => {
+		const fillsTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_fills");
+		expect(fillsTool).toBeDefined();
+
+		const fills = [{ type: "SOLID", color: "#FF0000" }];
+		const connector = {
+			setNodeFills: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", fills },
+			}),
+		};
+
+		const result = await fillsTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", fills },
+		);
+
+		expect(connector.setNodeFills).toHaveBeenCalledWith("123:456", fills);
+		expect(result.message).toBe("Fills updated successfully");
+	});
+
+	it("set strokes handler proxies to the desktop connector", async () => {
+		const strokesTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_strokes");
+		expect(strokesTool).toBeDefined();
+
+		const strokes = [{ type: "SOLID", color: "#111111" }];
+		const connector = {
+			setNodeStrokes: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", strokes, strokeWeight: 2 },
+			}),
+		};
+
+		const result = await strokesTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", strokes, strokeWeight: 2 },
+		);
+
+		expect(connector.setNodeStrokes).toHaveBeenCalledWith("123:456", strokes, 2);
+		expect(result.message).toBe("Strokes updated successfully");
+	});
+
+	it("set opacity schema constrains values to 0-1", () => {
+		const opacityTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_opacity");
+		expect(opacityTool).toBeDefined();
+
+		const parsed = opacityTool!.inputSchema.parse({
+			nodeId: "123:456",
+			opacity: 0.5,
+		});
+
+		expect(parsed.opacity).toBe(0.5);
+	});
+
+	it("set opacity handler proxies to the desktop connector", async () => {
+		const opacityTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_opacity");
+		expect(opacityTool).toBeDefined();
+
+		const connector = {
+			setNodeOpacity: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", opacity: 0.5 },
+			}),
+		};
+
+		const result = await opacityTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", opacity: 0.5 },
+		);
+
+		expect(connector.setNodeOpacity).toHaveBeenCalledWith("123:456", 0.5);
+		expect(result.message).toBe("Opacity updated successfully");
+	});
+
+	it("set corner radius handler proxies to the desktop connector", async () => {
+		const radiusTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_corner_radius");
+		expect(radiusTool).toBeDefined();
+
+		const connector = {
+			setNodeCornerRadius: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", cornerRadius: 8 },
+			}),
+		};
+
+		const result = await radiusTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", radius: 8 },
+		);
+
+		expect(connector.setNodeCornerRadius).toHaveBeenCalledWith("123:456", 8);
+		expect(result.message).toBe("Corner radius updated successfully");
+	});
+
+	it("move node handler proxies to the desktop connector", async () => {
+		const moveTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_move_node");
+		expect(moveTool).toBeDefined();
+
+		const connector = {
+			moveNode: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", x: 240, y: 320 },
+			}),
+		};
+
+		const result = await moveTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", x: 240, y: 320 },
+		);
+
+		expect(connector.moveNode).toHaveBeenCalledWith("123:456", 240, 320);
+		expect(result.message).toBe("Node moved to (240, 320)");
+	});
+
+	it("rename node handler proxies to the desktop connector", async () => {
+		const renameTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_rename_node");
+		expect(renameTool).toBeDefined();
+
+		const connector = {
+			renameNode: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", name: "Primary Button / Hover" },
+			}),
+		};
+
+		const result = await renameTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", newName: "Primary Button / Hover" },
+		);
+
+		expect(connector.renameNode).toHaveBeenCalledWith("123:456", "Primary Button / Hover");
+		expect(result.message).toBe('Node renamed to "Primary Button / Hover"');
+	});
+
+	it("clone node handler proxies to the desktop connector", async () => {
+		const cloneTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_clone_node");
+		expect(cloneTool).toBeDefined();
+
+		const connector = {
+			cloneNode: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "999:111", name: "Clone of Button" },
+			}),
+		};
+
+		const result = await cloneTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456" },
+		);
+
+		expect(connector.cloneNode).toHaveBeenCalledWith("123:456");
+		expect(result.message).toBe("Node cloned");
+		expect(result.clonedNode).toMatchObject({ id: "999:111" });
+	});
+
+	it("delete node handler proxies to the desktop connector", async () => {
+		const deleteTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_delete_node");
+		expect(deleteTool).toBeDefined();
+
+		const connector = {
+			deleteNode: jest.fn().mockResolvedValue({
+				success: true,
+				deleted: true,
+			}),
+		};
+
+		const result = await deleteTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456" },
+		);
+
+		expect(connector.deleteNode).toHaveBeenCalledWith("123:456");
+		expect(result.message).toBe("Node deleted");
+		expect(result.deleted).toBe(true);
+	});
+
+	it("set text content schema accepts optional font overrides", () => {
+		const textTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_text_content");
+		expect(textTool).toBeDefined();
+
+		const parsed = textTool!.inputSchema.parse({
+			nodeId: "123:456",
+			text: "Save changes",
+			fontSize: 14,
+			fontWeight: 600,
+			fontFamily: "Inter",
+		});
+
+		expect(parsed.text).toBe("Save changes");
+		expect(parsed.fontSize).toBe(14);
+		expect(parsed.fontWeight).toBe(600);
+		expect(parsed.fontFamily).toBe("Inter");
+	});
+
+	it("set text content handler proxies to the desktop connector", async () => {
+		const textTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_text_content");
+		expect(textTool).toBeDefined();
+
+		const connector = {
+			setTextContent: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "123:456", characters: "Save changes" },
+			}),
+		};
+
+		const result = await textTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{
+				nodeId: "123:456",
+				text: "Save changes",
+				fontSize: 14,
+				fontWeight: 600,
+				fontFamily: "Inter",
+			},
+		);
+
+		expect(connector.setTextContent).toHaveBeenCalledWith("123:456", "Save changes", {
+			fontSize: 14,
+			fontWeight: 600,
+			fontFamily: "Inter",
+		});
+		expect(result.message).toBe("Text content updated");
+	});
+
+	it("create child handler proxies to the desktop connector", async () => {
+		const createChildTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_create_child");
+		expect(createChildTool).toBeDefined();
+
+		const connector = {
+			createChildNode: jest.fn().mockResolvedValue({
+				success: true,
+				node: { id: "999:111", type: "TEXT", name: "Label" },
+			}),
+		};
+
+		const input = {
+			parentId: "123:456",
+			nodeType: "TEXT" as const,
+			properties: {
+				name: "Label",
+				x: 16,
+				y: 12,
+				text: "Save changes",
+			},
+		};
+
+		const result = await createChildTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			input,
+		);
+
+		expect(connector.createChildNode).toHaveBeenCalledWith("123:456", "TEXT", input.properties);
+		expect(result.message).toBe("Created TEXT node");
+		expect(result.node).toMatchObject({ id: "999:111" });
+	});
+
+	it("set image fill handler proxies to the desktop connector", async () => {
+		const imageFillTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_set_image_fill");
+		expect(imageFillTool).toBeDefined();
+
+		const connector = {
+			setImageFill: jest.fn().mockResolvedValue({
+				success: true,
+				updatedCount: 1,
+				imageHash: "hash123",
+				nodes: [{ id: "123:456" }],
+			}),
+		};
+
+		const result = await imageFillTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{
+				nodeIds: ["123:456"],
+				imageData: "iVBORw0KGgoAAAANSUhEUgAA...",
+				scaleMode: "FILL",
+			},
+		);
+
+		expect(connector.setImageFill).toHaveBeenCalledWith(
+			["123:456"],
+			"iVBORw0KGgoAAAANSUhEUgAA...",
+			"FILL",
+		);
+		expect(result.message).toBe("Image fill applied to 1 node(s)");
+		expect(result.imageHash).toBe("hash123");
+	});
+
 	it("edit component property handler proxies to the desktop connector", async () => {
 		const editTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_edit_component_property");
 		expect(editTool).toBeDefined();
@@ -295,6 +615,58 @@ describe("Local Read Tool Definitions", () => {
 			"Show Icon#123:456",
 		);
 		expect(result.message).toBe("Component property deleted");
+	});
+
+	it("capture screenshot handler proxies to the desktop connector", async () => {
+		const screenshotTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_capture_screenshot");
+		expect(screenshotTool).toBeDefined();
+
+		const connector = {
+			captureScreenshot: jest.fn().mockResolvedValue({
+				success: true,
+				image: {
+					base64: "abc123",
+					format: "PNG",
+					scale: 2,
+					byteLength: 1024,
+					node: { id: "123:456" },
+					bounds: { x: 0, y: 0, width: 100, height: 100 },
+				},
+			}),
+		};
+
+		const result = await screenshotTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", format: "PNG", scale: 2 },
+		);
+
+		expect(connector.captureScreenshot).toHaveBeenCalledWith("123:456", { format: "PNG", scale: 2 });
+		expect(result.success).toBe(true);
+		expect(result.image.base64).toBe("abc123");
+	});
+
+	it("lint design handler proxies to the desktop connector", async () => {
+		const lintTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_lint_design");
+		expect(lintTool).toBeDefined();
+
+		const connector = {
+			lintDesign: jest.fn().mockResolvedValue({
+				success: true,
+				data: {
+					summary: { totalFindings: 1 },
+					findings: [{ id: "wcag-contrast", severity: "critical" }],
+				},
+			}),
+		};
+
+		const result = await lintTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", rules: ["wcag"], maxDepth: 5, maxFindings: 20 },
+		);
+
+		expect(connector.lintDesign).toHaveBeenCalledWith("123:456", ["wcag"], 5, 20);
+		expect(result.summary.totalFindings).toBe(1);
+		expect(result.findings[0].id).toBe("wcag-contrast");
 	});
 
 	it("parity tool schema accepts expanded MCP parity fields", () => {

@@ -63,6 +63,92 @@ const setDescriptionInputSchema = z.object({
 	descriptionMarkdown: z.string().optional(),
 });
 
+const resizeNodeInputSchema = z.object({
+	nodeId: z.string(),
+	width: z.number(),
+	height: z.number(),
+	withConstraints: z.boolean().optional().default(true),
+});
+
+const fillSchema = z.object({
+	type: z.string(),
+}).passthrough();
+
+const strokeSchema = z.object({
+	type: z.string(),
+}).passthrough();
+
+const setFillsInputSchema = z.object({
+	nodeId: z.string(),
+	fills: z.array(fillSchema),
+});
+
+const setStrokesInputSchema = z.object({
+	nodeId: z.string(),
+	strokes: z.array(strokeSchema),
+	strokeWeight: z.number().optional(),
+});
+
+const setOpacityInputSchema = z.object({
+	nodeId: z.string(),
+	opacity: z.number().min(0).max(1),
+});
+
+const setCornerRadiusInputSchema = z.object({
+	nodeId: z.string(),
+	radius: z.number(),
+});
+
+const moveNodeInputSchema = z.object({
+	nodeId: z.string(),
+	x: z.number(),
+	y: z.number(),
+});
+
+const renameNodeInputSchema = z.object({
+	nodeId: z.string(),
+	newName: z.string(),
+});
+
+const cloneNodeInputSchema = z.object({
+	nodeId: z.string(),
+});
+
+const deleteNodeInputSchema = z.object({
+	nodeId: z.string(),
+});
+
+const setTextContentInputSchema = z.object({
+	nodeId: z.string(),
+	text: z.string(),
+	fontSize: z.number().optional(),
+	fontWeight: z.number().optional(),
+	fontFamily: z.string().optional(),
+});
+
+const createChildInputSchema = z.object({
+	parentId: z.string(),
+	nodeType: z.enum(["RECTANGLE", "ELLIPSE", "FRAME", "TEXT", "LINE"]),
+	properties: z.object({
+		name: z.string().optional(),
+		x: z.number().optional(),
+		y: z.number().optional(),
+		width: z.number().optional(),
+		height: z.number().optional(),
+		fills: z.array(z.object({
+			type: z.literal("SOLID"),
+			color: z.string(),
+		})).optional(),
+		text: z.string().optional(),
+	}).optional(),
+});
+
+const setImageFillInputSchema = z.object({
+	nodeIds: z.array(z.string()),
+	imageData: z.string(),
+	scaleMode: z.enum(["FILL", "FIT", "CROP", "TILE"]).optional(),
+});
+
 const editComponentPropertyInputSchema = z.object({
 	nodeId: z.string(),
 	propertyName: z.string(),
@@ -83,6 +169,19 @@ const deleteComponentPropertyInputSchema = z.object({
 	propertyName: z.string(),
 });
 
+const captureScreenshotInputSchema = z.object({
+	nodeId: z.string().optional(),
+	format: z.enum(["PNG", "JPG", "SVG"]).optional().default("PNG"),
+	scale: z.number().min(0.5).max(4).optional().default(2),
+});
+
+const lintDesignInputSchema = z.object({
+	nodeId: z.string().optional(),
+	rules: z.array(z.string()).optional(),
+	maxDepth: z.number().optional(),
+	maxFindings: z.number().optional(),
+});
+
 type VariablesInput = z.infer<typeof variablesInputSchema>;
 type SearchComponentsInput = z.infer<typeof searchComponentsInputSchema>;
 type ParityInput = z.infer<typeof parityInputSchema>;
@@ -91,8 +190,22 @@ type InstantiateComponentInput = z.infer<typeof instantiateComponentInputSchema>
 type SetInstancePropertiesInput = z.infer<typeof setInstancePropertiesInputSchema>;
 type AddComponentPropertyInput = z.infer<typeof addComponentPropertyInputSchema>;
 type SetDescriptionInput = z.infer<typeof setDescriptionInputSchema>;
+type ResizeNodeInput = z.infer<typeof resizeNodeInputSchema>;
+type SetFillsInput = z.infer<typeof setFillsInputSchema>;
+type SetStrokesInput = z.infer<typeof setStrokesInputSchema>;
+type SetOpacityInput = z.infer<typeof setOpacityInputSchema>;
+type SetCornerRadiusInput = z.infer<typeof setCornerRadiusInputSchema>;
+type MoveNodeInput = z.infer<typeof moveNodeInputSchema>;
+type RenameNodeInput = z.infer<typeof renameNodeInputSchema>;
+type CloneNodeInput = z.infer<typeof cloneNodeInputSchema>;
+type DeleteNodeInput = z.infer<typeof deleteNodeInputSchema>;
+type SetTextContentInput = z.infer<typeof setTextContentInputSchema>;
+type CreateChildInput = z.infer<typeof createChildInputSchema>;
+type SetImageFillInput = z.infer<typeof setImageFillInputSchema>;
 type EditComponentPropertyInput = z.infer<typeof editComponentPropertyInputSchema>;
 type DeleteComponentPropertyInput = z.infer<typeof deleteComponentPropertyInputSchema>;
+type CaptureScreenshotInput = z.infer<typeof captureScreenshotInputSchema>;
+type LintDesignInput = z.infer<typeof lintDesignInputSchema>;
 
 function resolveFileKey(url: string): string {
 	const urlInfo = extractFigmaUrlInfo(url);
@@ -647,6 +760,645 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const resizeNodeTool: ToolDefinition<ResizeNodeInput, any> = {
+		name: "figma_resize_node",
+		summary: "Resize a node to specific dimensions.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Resizes a node through the Desktop Bridge plugin, optionally respecting child constraints.",
+		tags: ["figma", "write", "layout", "resize"],
+		discoveryGroup: "write",
+		inputSchema: resizeNodeInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Resize a node while respecting constraints",
+				input: {
+					nodeId: "123:456",
+					width: 320,
+					height: 120,
+					withConstraints: true,
+				},
+			},
+		],
+		relatedTools: ["figma_set_fills", "figma_set_strokes"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: ResizeNodeInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.resizeNode(
+				input.nodeId,
+				input.width,
+				input.height,
+				input.withConstraints,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to resize node");
+			}
+
+			return {
+				success: true,
+				message: `Node resized to ${input.width}x${input.height}`,
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setFillsTool: ToolDefinition<SetFillsInput, any> = {
+		name: "figma_set_fills",
+		summary: "Set the fills on a node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Replaces a node's fills through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "visual", "fills"],
+		discoveryGroup: "write",
+		inputSchema: setFillsInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set a solid fill",
+				input: {
+					nodeId: "123:456",
+					fills: [{ type: "SOLID", color: "#FF0000" }],
+				},
+			},
+		],
+		relatedTools: ["figma_set_strokes", "figma_resize_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetFillsInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setNodeFills(input.nodeId, input.fills);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set fills");
+			}
+
+			return {
+				success: true,
+				message: "Fills updated successfully",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setStrokesTool: ToolDefinition<SetStrokesInput, any> = {
+		name: "figma_set_strokes",
+		summary: "Set the strokes on a node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Replaces a node's strokes and optional stroke weight through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "visual", "strokes"],
+		discoveryGroup: "write",
+		inputSchema: setStrokesInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set a solid stroke and weight",
+				input: {
+					nodeId: "123:456",
+					strokes: [{ type: "SOLID", color: "#111111" }],
+					strokeWeight: 2,
+				},
+			},
+		],
+		relatedTools: ["figma_set_fills", "figma_resize_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetStrokesInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setNodeStrokes(input.nodeId, input.strokes, input.strokeWeight);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set strokes");
+			}
+
+			return {
+				success: true,
+				message: "Strokes updated successfully",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setOpacityTool: ToolDefinition<SetOpacityInput, any> = {
+		name: "figma_set_opacity",
+		summary: "Set the opacity on a node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates a node's opacity through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "visual", "opacity"],
+		discoveryGroup: "write",
+		inputSchema: setOpacityInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set a node to 50% opacity",
+				input: {
+					nodeId: "123:456",
+					opacity: 0.5,
+				},
+			},
+		],
+		relatedTools: ["figma_set_fills", "figma_set_corner_radius"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetOpacityInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setNodeOpacity(input.nodeId, input.opacity);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set opacity");
+			}
+
+			return {
+				success: true,
+				message: "Opacity updated successfully",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setCornerRadiusTool: ToolDefinition<SetCornerRadiusInput, any> = {
+		name: "figma_set_corner_radius",
+		summary: "Set the corner radius on a node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates a node's corner radius through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "visual", "radius"],
+		discoveryGroup: "write",
+		inputSchema: setCornerRadiusInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Set a node to 8px corner radius",
+				input: {
+					nodeId: "123:456",
+					radius: 8,
+				},
+			},
+		],
+		relatedTools: ["figma_set_opacity", "figma_set_strokes"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetCornerRadiusInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setNodeCornerRadius(input.nodeId, input.radius);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set corner radius");
+			}
+
+			return {
+				success: true,
+				message: "Corner radius updated successfully",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const moveNodeTool: ToolDefinition<MoveNodeInput, any> = {
+		name: "figma_move_node",
+		summary: "Move a node to a new position.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Moves a node within its parent through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "layout", "move"],
+		discoveryGroup: "write",
+		inputSchema: moveNodeInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Move a node within its parent",
+				input: {
+					nodeId: "123:456",
+					x: 240,
+					y: 320,
+				},
+			},
+		],
+		relatedTools: ["figma_resize_node", "figma_rename_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: MoveNodeInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.moveNode(input.nodeId, input.x, input.y);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to move node");
+			}
+
+			return {
+				success: true,
+				message: `Node moved to (${input.x}, ${input.y})`,
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const renameNodeTool: ToolDefinition<RenameNodeInput, any> = {
+		name: "figma_rename_node",
+		summary: "Rename a node in the layer panel.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Renames a node through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "metadata", "rename"],
+		discoveryGroup: "write",
+		inputSchema: renameNodeInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Rename a node",
+				input: {
+					nodeId: "123:456",
+					newName: "Primary Button / Hover",
+				},
+			},
+		],
+		relatedTools: ["figma_set_description", "figma_move_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: RenameNodeInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.renameNode(input.nodeId, input.newName);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to rename node");
+			}
+
+			return {
+				success: true,
+				message: `Node renamed to "${input.newName}"`,
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const cloneNodeTool: ToolDefinition<CloneNodeInput, any> = {
+		name: "figma_clone_node",
+		summary: "Duplicate a node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Clones a node through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "nodes", "clone"],
+		discoveryGroup: "write",
+		inputSchema: cloneNodeInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Clone a node",
+				input: {
+					nodeId: "123:456",
+				},
+			},
+		],
+		relatedTools: ["figma_delete_node", "figma_move_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: CloneNodeInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.cloneNode(input.nodeId);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to clone node");
+			}
+
+			return {
+				success: true,
+				message: "Node cloned",
+				clonedNode: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const deleteNodeTool: ToolDefinition<DeleteNodeInput, any> = {
+		name: "figma_delete_node",
+		summary: "Delete a node from the canvas.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Deletes a node through the Desktop Bridge plugin. This is a destructive operation.",
+		tags: ["figma", "write", "nodes", "delete"],
+		discoveryGroup: "write",
+		inputSchema: deleteNodeInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Delete a node",
+				input: {
+					nodeId: "123:456",
+				},
+			},
+		],
+		relatedTools: ["figma_clone_node", "figma_move_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: DeleteNodeInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.deleteNode(input.nodeId);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to delete node");
+			}
+
+			return {
+				success: true,
+				message: "Node deleted",
+				deleted: result.deleted,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setTextContentTool: ToolDefinition<SetTextContentInput, any> = {
+		name: "figma_set_text_content",
+		summary: "Set the text content of a text node.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Updates a text node's characters and optional font settings through the Desktop Bridge plugin. For component instances, prefer figma_set_instance_properties when text is driven by component properties.",
+		tags: ["figma", "write", "text", "content"],
+		discoveryGroup: "write",
+		inputSchema: setTextContentInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Update text content and font size",
+				input: {
+					nodeId: "123:456",
+					text: "Save changes",
+					fontSize: 14,
+				},
+			},
+		],
+		relatedTools: ["figma_set_instance_properties", "figma_rename_node"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetTextContentInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const options = input.fontSize !== undefined || input.fontWeight !== undefined || input.fontFamily !== undefined
+				? {
+					fontSize: input.fontSize,
+					fontWeight: input.fontWeight,
+					fontFamily: input.fontFamily,
+				}
+				: undefined;
+			const result = await connector.setTextContent(input.nodeId, input.text, options);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set text content");
+			}
+
+			return {
+				success: true,
+				message: "Text content updated",
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const createChildTool: ToolDefinition<CreateChildInput, any> = {
+		name: "figma_create_child",
+		summary: "Create a child node inside a parent container.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Creates a RECTANGLE, ELLIPSE, FRAME, TEXT, or LINE inside an existing parent through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "nodes", "create"],
+		discoveryGroup: "write",
+		inputSchema: createChildInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Create a text node inside a frame",
+				input: {
+					parentId: "123:456",
+					nodeType: "TEXT",
+					properties: {
+						name: "Label",
+						x: 16,
+						y: 12,
+						text: "Save changes",
+					},
+				},
+			},
+		],
+		relatedTools: ["figma_set_text_content", "figma_set_fills"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: CreateChildInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.createChildNode(
+				input.parentId,
+				input.nodeType,
+				input.properties,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to create node");
+			}
+
+			return {
+				success: true,
+				message: `Created ${input.nodeType} node`,
+				node: result.node,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const setImageFillTool: ToolDefinition<SetImageFillInput, any> = {
+		name: "figma_set_image_fill",
+		summary: "Apply an image fill to one or more nodes.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Applies a base64-encoded image fill through the Desktop Bridge plugin.",
+		tags: ["figma", "write", "images", "fills"],
+		discoveryGroup: "write",
+		inputSchema: setImageFillInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Apply an image fill to a rectangle",
+				input: {
+					nodeIds: ["123:456"],
+					imageData: "iVBORw0KGgoAAAANSUhEUgAA...",
+					scaleMode: "FILL",
+				},
+			},
+		],
+		relatedTools: ["figma_set_fills", "figma_create_child"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: SetImageFillInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.setImageFill(input.nodeIds, input.imageData, input.scaleMode || "FILL");
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to set image fill");
+			}
+
+			return {
+				success: true,
+				message: `Image fill applied to ${result.updatedCount || 0} node(s)`,
+				imageHash: result.imageHash,
+				nodes: result.nodes,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	const editComponentPropertyTool: ToolDefinition<EditComponentPropertyInput, any> = {
 		name: "figma_edit_component_property",
 		summary: "Edit an existing component property.",
@@ -759,6 +1511,123 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const captureScreenshotTool: ToolDefinition<CaptureScreenshotInput, any> = {
+		name: "figma_capture_screenshot",
+		summary: "Capture a screenshot from the current plugin runtime state.",
+		description:
+			"Registry-backed validation tool for HTTP/CLI. Captures a screenshot via the Desktop Bridge plugin's exportAsync path, which reflects the current plugin runtime state rather than delayed cloud rendering.",
+		tags: ["figma", "validation", "screenshot", "plugin"],
+		discoveryGroup: "analysis",
+		inputSchema: captureScreenshotInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Capture a PNG screenshot of a node",
+				input: {
+					nodeId: "123:456",
+					format: "PNG",
+					scale: 2,
+				},
+			},
+		],
+		relatedTools: ["figma_lint_design", "figma_check_design_parity"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: CaptureScreenshotInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.captureScreenshot(input.nodeId || "", {
+				format: input.format,
+				scale: input.scale,
+			});
+
+			if (!result.success) {
+				throw new Error(result.error || "Screenshot capture failed");
+			}
+
+			return {
+				success: true,
+				image: {
+					base64: result.image?.base64,
+					format: result.image?.format,
+					scale: result.image?.scale,
+					byteLength: result.image?.byteLength,
+					node: result.image?.node,
+					bounds: result.image?.bounds,
+				},
+				metadata: {
+					source: "plugin_export_async",
+					note: "Screenshot captured from the current plugin runtime state.",
+				},
+				timestamp: Date.now(),
+			};
+		},
+	};
+
+	const lintDesignTool: ToolDefinition<LintDesignInput, any> = {
+		name: "figma_lint_design",
+		summary: "Run accessibility and design quality checks.",
+		description:
+			"Registry-backed analysis tool for HTTP/CLI. Runs design linting through the Desktop Bridge plugin and returns categorized findings for WCAG, design-system, and layout issues.",
+		tags: ["figma", "analysis", "lint", "accessibility"],
+		discoveryGroup: "analysis",
+		inputSchema: lintDesignInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "large",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Lint the current page",
+				input: {
+					rules: ["all"],
+					maxDepth: 10,
+					maxFindings: 100,
+				},
+			},
+		],
+		relatedTools: ["figma_capture_screenshot", "figma_check_design_parity"],
+		commonErrors: [
+			{
+				code: "PLUGIN_REQUIRED",
+				message: "Desktop Bridge plugin is not connected.",
+				hint: "Open the Desktop Bridge plugin in the target Figma file and retry.",
+			},
+		],
+		handler: async ({ runtime }, input: LintDesignInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.lintDesign(
+				input.nodeId,
+				input.rules || ["all"],
+				input.maxDepth || 10,
+				input.maxFindings || 100,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Lint failed");
+			}
+
+			return result.data || result;
+		},
+	};
+
 	return [
 		getVariablesTool,
 		searchComponentsTool,
@@ -768,8 +1637,22 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		setInstancePropertiesTool,
 		addComponentPropertyTool,
 		setDescriptionTool,
+		resizeNodeTool,
+		setFillsTool,
+		setStrokesTool,
+		setOpacityTool,
+		setCornerRadiusTool,
+		moveNodeTool,
+		renameNodeTool,
+		cloneNodeTool,
+		deleteNodeTool,
+		setTextContentTool,
+		createChildTool,
+		setImageFillTool,
 		editComponentPropertyTool,
 		deleteComponentPropertyTool,
+		captureScreenshotTool,
+		lintDesignTool,
 	];
 }
 
