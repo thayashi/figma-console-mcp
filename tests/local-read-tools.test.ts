@@ -29,6 +29,7 @@ describe("Local Read Tool Definitions", () => {
 		expect(readToolNames.has("figma_get_component_for_development")).toBe(true);
 		expect(readToolNames.has("figma_generate_component_doc")).toBe(true);
 		expect(readToolNames.has("figma_get_status")).toBe(true);
+		expect(readToolNames.has("figma_get_project_policy")).toBe(true);
 		expect(readToolNames.has("figma_get_selection")).toBe(true);
 		expect(readToolNames.has("figma_list_open_files")).toBe(true);
 		expect(readToolNames.has("figma_get_comments")).toBe(true);
@@ -46,6 +47,7 @@ describe("Local Read Tool Definitions", () => {
 		expect(writeToolNames.has("figma_batch_create_variables")).toBe(true);
 		expect(writeToolNames.has("figma_setup_design_tokens")).toBe(true);
 		expect(writeToolNames.has("figma_instantiate_component")).toBe(true);
+		expect(writeToolNames.has("figma_arrange_component_set")).toBe(true);
 		expect(writeToolNames.has("figma_post_comment")).toBe(true);
 		expect(writeToolNames.has("figma_delete_comment")).toBe(true);
 		expect(writeToolNames.has("figma_check_design_parity")).toBe(false);
@@ -77,11 +79,51 @@ describe("Local Read Tool Definitions", () => {
 		expect(discoveryGroupByName.get("figma_execute")).toBe("execute");
 		expect(discoveryGroupByName.get("figma_update_variable")).toBe("variables");
 		expect(discoveryGroupByName.get("figma_instantiate_component")).toBe("components");
+		expect(discoveryGroupByName.get("figma_arrange_component_set")).toBe("components");
 		expect(discoveryGroupByName.get("figma_post_comment")).toBe("comments");
 		expect(discoveryGroupByName.get("figma_set_text_content")).toBe("content");
 		expect(discoveryGroupByName.get("figma_set_fills")).toBe("styling");
 		expect(discoveryGroupByName.get("figma_set_description")).toBe("metadata");
 		expect(discoveryGroupByName.get("figma_create_child")).toBe("nodes");
+	});
+
+	it("arrange component set tool executes through the desktop connector", async () => {
+		const tool = createLocalWriteToolDefinitions().find((candidate) => candidate.name === "figma_arrange_component_set");
+		expect(tool).toBeDefined();
+
+		const connector = {
+			executeCodeViaUI: jest.fn().mockResolvedValue({
+				success: true,
+				result: {
+					success: true,
+					componentSetId: "321:654",
+					componentSetName: "Button",
+					variantCount: 8,
+				},
+			}),
+		};
+
+		const result = await tool!.handler(
+			{
+				runtime: {
+					getDesktopConnector: async () => connector,
+				},
+			} as any,
+			{
+				componentSetId: "123:456",
+				options: {
+					columnProperty: "State",
+				},
+			},
+		);
+
+		expect(connector.executeCodeViaUI).toHaveBeenCalledWith(
+			expect.stringContaining("\"123:456\""),
+			25000,
+		);
+		expect(result.componentSetId).toBe("321:654");
+		expect(result.hint).toContain("figma_capture_screenshot");
+		expect(typeof result.timestamp).toBe("number");
 	});
 
 	it("get status tool returns runtime status with timestamp", async () => {
@@ -98,6 +140,13 @@ describe("Local Read Tool Definitions", () => {
 						pluginConnected: true,
 						restAuthenticated: false,
 						selectionCount: 2,
+						projectPolicy: {
+							status: "loaded",
+							sourcePath: "/workspace/figma-console.project.json",
+							workspaceRoot: "/workspace",
+							projectName: "Acme Dashboard",
+							checkedPaths: ["/workspace/figma-console.project.json"],
+						},
 						warnings: [],
 					}),
 				},
@@ -107,6 +156,80 @@ describe("Local Read Tool Definitions", () => {
 
 		expect(result.connected).toBe(true);
 		expect(result.activeFileUrl).toContain("abc123");
+		expect(result.projectPolicy?.projectName).toBe("Acme Dashboard");
+		expect(typeof result.timestamp).toBe("number");
+	});
+
+	it("get project policy tool returns loaded policy details", async () => {
+		const policyTool = createReadToolDefinitions().find((tool) => tool.name === "figma_get_project_policy");
+		expect(policyTool).toBeDefined();
+
+		const result = await policyTool!.handler(
+			{
+				runtime: {
+					getProjectPolicyState: () => ({
+						status: "loaded",
+						cwd: "/workspace",
+						checkedPaths: ["/workspace/figma-console.project.json"],
+						error: undefined,
+						policy: {
+							sourcePath: "/workspace/figma-console.project.json",
+							workspaceRoot: "/workspace",
+							policy: {
+								version: 1,
+								projectName: "Acme Dashboard",
+								mockups: {
+									preferredFonts: ["Inter"],
+									spacingScale: [4, 8, 16],
+									preferredComponents: {
+										buttons: ["Button/Primary"],
+									},
+									componentLibraries: [],
+									defaultScreenPresets: [],
+									notes: [],
+								},
+								validation: {
+									requireScreenshotReview: true,
+									requireLint: true,
+									lintRules: ["all"],
+									requireParity: false,
+								},
+							},
+						},
+					}),
+					getProjectPolicy: () => ({
+						sourcePath: "/workspace/figma-console.project.json",
+						workspaceRoot: "/workspace",
+						policy: {
+							version: 1,
+							projectName: "Acme Dashboard",
+							mockups: {
+								preferredFonts: ["Inter"],
+								spacingScale: [4, 8, 16],
+								preferredComponents: {
+									buttons: ["Button/Primary"],
+								},
+								componentLibraries: [],
+								defaultScreenPresets: [],
+								notes: [],
+							},
+							validation: {
+								requireScreenshotReview: true,
+								requireLint: true,
+								lintRules: ["all"],
+								requireParity: false,
+							},
+						},
+					}),
+				},
+			} as any,
+			{},
+		);
+
+		expect(result.status).toBe("loaded");
+		expect(result.projectName).toBe("Acme Dashboard");
+		expect(result.sourcePath).toContain("figma-console.project.json");
+		expect(result.policy.mockups.preferredComponents.buttons).toEqual(["Button/Primary"]);
 		expect(typeof result.timestamp).toBe("number");
 	});
 
@@ -1905,6 +2028,108 @@ describe("Local Read Tool Definitions", () => {
 		expect(connector.lintDesign).toHaveBeenCalledWith("123:456", ["wcag"], 5, 20);
 		expect(result.summary.totalFindings).toBe(1);
 		expect(result.findings[0].id).toBe("wcag-contrast");
+	});
+
+	it("lint design handler expands the mockup-quality preset", async () => {
+		const lintTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_lint_design");
+		expect(lintTool).toBeDefined();
+
+		const connector = {
+			lintDesign: jest.fn().mockResolvedValue({
+				success: true,
+				data: {
+					summary: { totalFindings: 2 },
+					findings: [{ id: "no-autolayout", severity: "warning" }],
+				},
+			}),
+		};
+
+		const result = await lintTool!.handler(
+			{ runtime: { getDesktopConnector: async () => connector } } as any,
+			{ nodeId: "123:456", preset: "mockup-quality", maxDepth: 8, maxFindings: 40 },
+		);
+
+		expect(connector.lintDesign).toHaveBeenCalledWith(
+			"123:456",
+			[
+				"no-autolayout",
+				"empty-container",
+				"default-name",
+				"detached-component",
+				"hardcoded-color",
+				"no-text-style",
+				"wcag-text-size",
+				"wcag-line-height",
+			],
+			8,
+			40,
+		);
+		expect(result.lintRequest.appliedPresets).toEqual(["mockup-quality"]);
+		expect(result.lintRequest.requestSource).toBe("input");
+		expect(result.summary.totalFindings).toBe(2);
+	});
+
+	it("lint design handler falls back to project policy lint rules when no explicit rules are provided", async () => {
+		const lintTool = createLocalReadToolDefinitions().find((tool) => tool.name === "figma_lint_design");
+		expect(lintTool).toBeDefined();
+
+		const connector = {
+			lintDesign: jest.fn().mockResolvedValue({
+				success: true,
+				data: {
+					summary: { totalFindings: 0 },
+					findings: [],
+				},
+			}),
+		};
+
+		const result = await lintTool!.handler(
+			{
+				runtime: {
+					getDesktopConnector: async () => connector,
+					getProjectPolicy: () => ({
+						sourcePath: "/workspace/figma-console.project.json",
+						workspaceRoot: "/workspace",
+						policy: {
+							version: 1,
+							mockups: {
+								preferredFonts: [],
+								spacingScale: [],
+								preferredComponents: {},
+								componentLibraries: [],
+								defaultScreenPresets: [],
+								notes: [],
+							},
+							validation: {
+								requireScreenshotReview: true,
+								requireLint: true,
+								lintRules: ["mockup-quality"],
+								requireParity: false,
+							},
+						},
+					}),
+				},
+			} as any,
+			{},
+		);
+
+		expect(connector.lintDesign).toHaveBeenCalledWith(
+			undefined,
+			[
+				"no-autolayout",
+				"empty-container",
+				"default-name",
+				"detached-component",
+				"hardcoded-color",
+				"no-text-style",
+				"wcag-text-size",
+				"wcag-line-height",
+			],
+			10,
+			100,
+		);
+		expect(result.lintRequest.appliedPresets).toEqual(["mockup-quality"]);
+		expect(result.lintRequest.requestSource).toBe("project-policy");
 	});
 
 	it("parity tool schema accepts expanded MCP parity fields", () => {

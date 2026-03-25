@@ -237,6 +237,16 @@ const deleteCommentInputSchema = z.object({
 	comment_id: z.string(),
 });
 
+const arrangeComponentSetInputSchema = z.object({
+	componentSetId: z.string().optional(),
+	componentSetName: z.string().optional(),
+	options: z.object({
+		gap: z.number().optional().default(24),
+		cellPadding: z.number().optional().default(20),
+		columnProperty: z.string().optional(),
+	}).optional(),
+});
+
 type ExecuteInput = z.infer<typeof executeInputSchema>;
 type UpdateVariableInput = z.infer<typeof updateVariableInputSchema>;
 type CreateVariableInput = z.infer<typeof createVariableInputSchema>;
@@ -269,6 +279,7 @@ type EditComponentPropertyInput = z.infer<typeof editComponentPropertyInputSchem
 type DeleteComponentPropertyInput = z.infer<typeof deleteComponentPropertyInputSchema>;
 type PostCommentInput = z.infer<typeof postCommentInputSchema>;
 type DeleteCommentInput = z.infer<typeof deleteCommentInputSchema>;
+type ArrangeComponentSetInput = z.infer<typeof arrangeComponentSetInputSchema>;
 
 const pluginRequiredErrors = [
 	{
@@ -298,6 +309,367 @@ function hexToRgba(hex) {
     a: hex.length === 8 ? parseInt(hex.substring(6, 8), 16) / 255 : 1
   };
 }`;
+}
+
+function buildArrangeComponentSetScript(input: ArrangeComponentSetInput): string {
+	return `
+const config = ${JSON.stringify(input.options || {})};
+const gap = config.gap ?? 24;
+const cellPadding = config.cellPadding ?? 20;
+const columnProperty = config.columnProperty || null;
+
+const LABEL_FONT_SIZE = 12;
+const LABEL_COLOR = { r: 0.4, g: 0.4, b: 0.4 };
+const TITLE_FONT_SIZE = 24;
+const TITLE_COLOR = { r: 0.1, g: 0.1, b: 0.1 };
+const CONTAINER_PADDING = 40;
+const LABEL_GAP = 16;
+const COLUMN_HEADER_HEIGHT = 32;
+
+let componentSet = null;
+const csId = ${JSON.stringify(input.componentSetId || null)};
+const csName = ${JSON.stringify(input.componentSetName || null)};
+
+if (csId) {
+	componentSet = await figma.getNodeByIdAsync(csId);
+} else if (csName) {
+	const allNodes = figma.currentPage.findAll(n => n.type === "COMPONENT_SET" && n.name === csName);
+	componentSet = allNodes[0];
+} else {
+	const selection = figma.currentPage.selection;
+	componentSet = selection.find(n => n.type === "COMPONENT_SET");
+}
+
+if (!componentSet || componentSet.type !== "COMPONENT_SET") {
+	return { error: "Component set not found. Provide componentSetId, componentSetName, or select a component set." };
+}
+
+const page = figma.currentPage;
+const csOriginalX = componentSet.x;
+const csOriginalY = componentSet.y;
+const csOriginalName = componentSet.name;
+
+const variants = componentSet.children.filter(n => n.type === "COMPONENT");
+if (variants.length === 0) {
+	return { error: "No variants found in component set" };
+}
+
+const parseVariantName = (name) => {
+	const props = {};
+	const parts = name.split(", ");
+	for (const part of parts) {
+		const [key, value] = part.split("=");
+		if (key && value) {
+			props[key.trim()] = value.trim();
+		}
+	}
+	return props;
+};
+
+const propertyValues = {};
+const propertyOrder = [];
+for (const variant of variants) {
+	const props = parseVariantName(variant.name);
+	for (const [key, value] of Object.entries(props)) {
+		if (!propertyValues[key]) {
+			propertyValues[key] = new Set();
+			propertyOrder.push(key);
+		}
+		propertyValues[key].add(value);
+	}
+}
+for (const key of Object.keys(propertyValues)) {
+	propertyValues[key] = Array.from(propertyValues[key]);
+}
+
+const columnProp = columnProperty || propertyOrder[propertyOrder.length - 1];
+const columnValues = propertyValues[columnProp] || [];
+const rowProps = propertyOrder.filter(p => p !== columnProp);
+
+const generateRowCombinations = (props, values) => {
+	if (props.length === 0) return [{}];
+	if (props.length === 1) {
+		return values[props[0]].map(v => ({ [props[0]]: v }));
+	}
+	const result = [];
+	const firstProp = props[0];
+	const restProps = props.slice(1);
+	const restCombos = generateRowCombinations(restProps, values);
+	for (const value of values[firstProp]) {
+		for (const combo of restCombos) {
+			result.push({ [firstProp]: value, ...combo });
+		}
+	}
+	return result;
+};
+const rowCombinations = generateRowCombinations(rowProps, propertyValues);
+
+const totalCols = columnValues.length;
+const totalRows = rowCombinations.length;
+
+let maxVariantWidth = 0;
+let maxVariantHeight = 0;
+for (const v of variants) {
+	if (v.width > maxVariantWidth) maxVariantWidth = v.width;
+	if (v.height > maxVariantHeight) maxVariantHeight = v.height;
+}
+
+const cellWidth = Math.ceil(maxVariantWidth + cellPadding);
+const cellHeight = Math.ceil(maxVariantHeight + cellPadding);
+
+const edgePadding = 24;
+const csWidth = (totalCols * cellWidth) + ((totalCols - 1) * gap) + (edgePadding * 2);
+const csHeight = (totalRows * cellHeight) + ((totalRows - 1) * gap) + (edgePadding * 2);
+
+const oldElements = page.children.filter(n =>
+	(n.type === "TEXT" && (n.name.startsWith("Row: ") || n.name.startsWith("Col: "))) ||
+	(n.type === "FRAME" && (n.name === "Component Container" || n.name === "Row Labels" || n.name === "Column Headers"))
+);
+for (const el of oldElements) {
+	el.remove();
+}
+
+const clonedVariants = [];
+for (const variant of variants) {
+	const clone = variant.clone();
+	page.appendChild(clone);
+	clonedVariants.push(clone);
+}
+
+componentSet.remove();
+
+const newComponentSet = figma.combineAsVariants(clonedVariants, page);
+newComponentSet.name = csOriginalName;
+newComponentSet.strokes = [{
+	type: "SOLID",
+	color: { r: 151/255, g: 71/255, b: 255/255 }
+}];
+newComponentSet.dashPattern = [10, 5];
+newComponentSet.strokeWeight = 1;
+newComponentSet.strokeAlign = "INSIDE";
+
+const newVariants = newComponentSet.children.filter(n => n.type === "COMPONENT");
+
+for (const variant of newVariants) {
+	const props = parseVariantName(variant.name);
+	const colValue = props[columnProp];
+	const colIdx = columnValues.indexOf(colValue);
+
+	let rowIdx = -1;
+	for (let i = 0; i < rowCombinations.length; i++) {
+		const combo = rowCombinations[i];
+		let match = true;
+		for (const [key, value] of Object.entries(combo)) {
+			if (props[key] !== value) {
+				match = false;
+				break;
+			}
+		}
+		if (match) {
+			rowIdx = i;
+			break;
+		}
+	}
+
+	if (colIdx >= 0 && rowIdx >= 0) {
+		const cellX = edgePadding + colIdx * (cellWidth + gap);
+		const cellY = edgePadding + rowIdx * (cellHeight + gap);
+		const variantX = Math.round(cellX + (cellWidth - variant.width) / 2);
+		const variantY = Math.round(cellY + (cellHeight - variant.height) / 2);
+		variant.x = variantX;
+		variant.y = variantY;
+	}
+}
+
+newComponentSet.resize(csWidth, csHeight);
+
+await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+await figma.loadFontAsync({ family: "Inter", style: "Semi Bold" });
+
+const containerFrame = figma.createFrame();
+containerFrame.name = "Component Container";
+containerFrame.fills = [{ type: "SOLID", color: { r: 1, g: 1, b: 1 } }];
+containerFrame.cornerRadius = 8;
+containerFrame.layoutMode = "VERTICAL";
+containerFrame.primaryAxisSizingMode = "AUTO";
+containerFrame.counterAxisSizingMode = "AUTO";
+containerFrame.paddingTop = CONTAINER_PADDING;
+containerFrame.paddingRight = CONTAINER_PADDING;
+containerFrame.paddingBottom = CONTAINER_PADDING;
+containerFrame.paddingLeft = CONTAINER_PADDING;
+containerFrame.itemSpacing = 24;
+
+const titleText = figma.createText();
+titleText.name = "Title";
+titleText.characters = csOriginalName;
+titleText.fontSize = TITLE_FONT_SIZE;
+titleText.fontName = { family: "Inter", style: "Semi Bold" };
+titleText.fills = [{ type: "SOLID", color: TITLE_COLOR }];
+containerFrame.appendChild(titleText);
+titleText.layoutSizingHorizontal = "HUG";
+titleText.layoutSizingVertical = "HUG";
+
+const contentRow = figma.createFrame();
+contentRow.name = "Content Row";
+contentRow.fills = [];
+contentRow.layoutMode = "HORIZONTAL";
+contentRow.primaryAxisSizingMode = "AUTO";
+contentRow.counterAxisSizingMode = "AUTO";
+contentRow.itemSpacing = LABEL_GAP;
+contentRow.counterAxisAlignItems = "MIN";
+containerFrame.appendChild(contentRow);
+
+const rowLabelsFrame = figma.createFrame();
+rowLabelsFrame.name = "Row Labels";
+rowLabelsFrame.fills = [];
+rowLabelsFrame.layoutMode = "VERTICAL";
+rowLabelsFrame.primaryAxisSizingMode = "AUTO";
+rowLabelsFrame.counterAxisSizingMode = "AUTO";
+rowLabelsFrame.counterAxisAlignItems = "MAX";
+rowLabelsFrame.itemSpacing = 0;
+
+const rowLabelSpacer = figma.createFrame();
+rowLabelSpacer.name = "Spacer";
+rowLabelSpacer.fills = [];
+rowLabelSpacer.resize(10, COLUMN_HEADER_HEIGHT + gap + edgePadding);
+rowLabelsFrame.appendChild(rowLabelSpacer);
+rowLabelSpacer.layoutSizingVertical = "FIXED";
+
+for (let i = 0; i < rowCombinations.length; i++) {
+	const combo = rowCombinations[i];
+	const labelText = rowProps.map(p => combo[p]).join(" / ");
+	const isLastRow = i === rowCombinations.length - 1;
+
+	const rowLabelContainer = figma.createFrame();
+	rowLabelContainer.name = "Row: " + labelText;
+	rowLabelContainer.fills = [];
+	rowLabelContainer.layoutMode = "VERTICAL";
+	rowLabelContainer.primaryAxisSizingMode = "FIXED";
+	rowLabelContainer.primaryAxisAlignItems = "CENTER";
+	rowLabelContainer.counterAxisAlignItems = "MAX";
+	rowLabelContainer.resize(10, cellHeight);
+
+	const label = figma.createText();
+	label.characters = labelText;
+	label.fontSize = LABEL_FONT_SIZE;
+	label.fontName = { family: "Inter", style: "Regular" };
+	label.fills = [{ type: "SOLID", color: LABEL_COLOR }];
+	label.textAlignHorizontal = "RIGHT";
+	rowLabelContainer.appendChild(label);
+
+	rowLabelsFrame.appendChild(rowLabelContainer);
+	rowLabelContainer.layoutSizingHorizontal = "HUG";
+	rowLabelContainer.layoutSizingVertical = "FIXED";
+
+	if (!isLastRow) {
+		const gapSpacer = figma.createFrame();
+		gapSpacer.name = "Row Gap";
+		gapSpacer.fills = [];
+		gapSpacer.resize(1, gap);
+		rowLabelsFrame.appendChild(gapSpacer);
+		gapSpacer.layoutSizingHorizontal = "FIXED";
+		gapSpacer.layoutSizingVertical = "FIXED";
+	}
+}
+
+contentRow.appendChild(rowLabelsFrame);
+
+const gridColumn = figma.createFrame();
+gridColumn.name = "Grid Column";
+gridColumn.fills = [];
+gridColumn.layoutMode = "VERTICAL";
+gridColumn.primaryAxisSizingMode = "AUTO";
+gridColumn.counterAxisSizingMode = "AUTO";
+gridColumn.itemSpacing = gap;
+
+const columnHeadersRow = figma.createFrame();
+columnHeadersRow.name = "Column Headers";
+columnHeadersRow.fills = [];
+columnHeadersRow.layoutMode = "HORIZONTAL";
+columnHeadersRow.resize(csWidth, COLUMN_HEADER_HEIGHT);
+columnHeadersRow.itemSpacing = 0;
+columnHeadersRow.paddingLeft = edgePadding;
+columnHeadersRow.paddingRight = edgePadding;
+
+for (let i = 0; i < columnValues.length; i++) {
+	const colValue = columnValues[i];
+	const isLastCol = i === columnValues.length - 1;
+
+	const colHeaderContainer = figma.createFrame();
+	colHeaderContainer.name = "Col: " + colValue;
+	colHeaderContainer.fills = [];
+	colHeaderContainer.layoutMode = "HORIZONTAL";
+	colHeaderContainer.primaryAxisAlignItems = "CENTER";
+	colHeaderContainer.counterAxisAlignItems = "MAX";
+
+	const colWidth = isLastCol ? cellWidth : cellWidth + gap;
+	colHeaderContainer.resize(colWidth, COLUMN_HEADER_HEIGHT);
+	if (!isLastCol) {
+		colHeaderContainer.paddingRight = gap;
+	}
+
+	const label = figma.createText();
+	label.characters = colValue;
+	label.fontSize = LABEL_FONT_SIZE;
+	label.fontName = { family: "Inter", style: "Regular" };
+	label.fills = [{ type: "SOLID", color: LABEL_COLOR }];
+	label.textAlignHorizontal = "CENTER";
+	colHeaderContainer.appendChild(label);
+
+	columnHeadersRow.appendChild(colHeaderContainer);
+	colHeaderContainer.layoutSizingHorizontal = "FIXED";
+	colHeaderContainer.layoutSizingVertical = "FILL";
+}
+
+gridColumn.appendChild(columnHeadersRow);
+columnHeadersRow.layoutSizingHorizontal = "FIXED";
+columnHeadersRow.layoutSizingVertical = "FIXED";
+
+const componentSetWrapper = figma.createFrame();
+componentSetWrapper.name = "Component Set Wrapper";
+componentSetWrapper.fills = [];
+componentSetWrapper.resize(csWidth, csHeight);
+componentSetWrapper.appendChild(newComponentSet);
+newComponentSet.x = 0;
+newComponentSet.y = 0;
+
+gridColumn.appendChild(componentSetWrapper);
+componentSetWrapper.layoutSizingHorizontal = "FIXED";
+componentSetWrapper.layoutSizingVertical = "FIXED";
+
+contentRow.appendChild(gridColumn);
+
+containerFrame.x = csOriginalX - CONTAINER_PADDING - 120;
+containerFrame.y = csOriginalY - CONTAINER_PADDING - TITLE_FONT_SIZE - 24 - COLUMN_HEADER_HEIGHT - gap;
+
+figma.currentPage.selection = [containerFrame];
+figma.viewport.scrollAndZoomIntoView([containerFrame]);
+
+return {
+	success: true,
+	message: "Component set arranged with proper container, labels, and alignment",
+	containerId: containerFrame.id,
+	componentSetId: newComponentSet.id,
+	componentSetName: newComponentSet.name,
+	grid: {
+		rows: totalRows,
+		columns: totalCols,
+		cellWidth: cellWidth,
+		cellHeight: cellHeight,
+		gap: gap,
+		columnProperty: columnProp,
+		columnValues: columnValues,
+		rowProperties: rowProps,
+		rowLabels: rowCombinations.map(combo => rowProps.map(p => combo[p]).join(" / "))
+	},
+	componentSetSize: { width: csWidth, height: csHeight },
+	variantCount: newVariants.length,
+	structure: {
+		container: "White frame with title, row labels, column headers, and component set",
+		rowLabels: "Vertically aligned with each row's center",
+		columnHeaders: "Horizontally aligned with each column's center"
+	}
+};`;
 }
 
 export function createLocalWriteToolDefinitions(): ToolDefinition<any, any>[] {
@@ -1818,6 +2190,58 @@ return {
 		},
 	};
 
+	const arrangeComponentSetTool: ToolDefinition<ArrangeComponentSetInput, any> = {
+		name: "figma_arrange_component_set",
+		summary: "Rebuild and label a component set grid.",
+		description:
+			"Registry-backed write tool for HTTP/CLI. Recreates a component set with Figma's native variant grouping, then wraps it in a labeled container with row and column headers for design-system cleanup workflows.",
+		tags: ["figma", "write", "components", "variants", "layout"],
+		discoveryGroup: "components",
+		inputSchema: arrangeComponentSetInputSchema,
+		capabilities: {
+			requiresPlugin: true,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "document_write",
+		},
+		examples: [
+			{
+				title: "Arrange a selected component set by state columns",
+				input: {
+					options: {
+						gap: 24,
+						cellPadding: 20,
+						columnProperty: "State",
+					},
+				},
+			},
+		],
+		relatedTools: ["figma_instantiate_component", "figma_capture_screenshot"],
+		commonErrors: pluginRequiredErrors,
+		handler: async ({ runtime }, input: ArrangeComponentSetInput) => {
+			const connector = await runtime.getDesktopConnector();
+			const result = await connector.executeCodeViaUI(
+				buildArrangeComponentSetScript(input),
+				25000,
+			);
+
+			if (!result.success) {
+				throw new Error(result.error || "Failed to arrange component set");
+			}
+
+			return {
+				...result.result,
+				hint: result.result?.success
+					? "Component set arranged in a labeled container frame. Use figma_capture_screenshot to validate the layout."
+					: undefined,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	return normalizeToolDefinitions([
 		executeTool,
 		updateVariableTool,
@@ -1849,6 +2273,7 @@ return {
 		setImageFillTool,
 		editComponentPropertyTool,
 		deleteComponentPropertyTool,
+		arrangeComponentSetTool,
 		postCommentTool,
 		deleteCommentTool,
 	]);

@@ -3,6 +3,7 @@ import type { ConsoleMonitor } from "../core/console-monitor.js";
 import type { IFigmaConnector } from "../core/figma-connector.js";
 import type { ConsoleLogEntry } from "../core/types/index.js";
 import type { ToolTransport } from "../tools/types.js";
+import type { LoadedProjectPolicy, ProjectPolicyState, ProjectPolicySummary } from "./project-policy.js";
 
 export interface RuntimeStatus {
 	connected: boolean;
@@ -11,6 +12,7 @@ export interface RuntimeStatus {
 	pluginConnected: boolean;
 	restAuthenticated: boolean;
 	selectionCount?: number;
+	projectPolicy?: ProjectPolicySummary;
 	warnings?: string[];
 }
 
@@ -76,6 +78,8 @@ export interface FigmaRuntime {
 	getConsoleLogs?(options?: { count?: number; level?: ConsoleLogEntry["level"] | "all"; since?: number }): ConsoleLogEntry[];
 	clearConsoleLogs?(): number;
 	getConsoleStatus?(): RuntimeConsoleStatus | null;
+	getProjectPolicy?(): LoadedProjectPolicy | null;
+	getProjectPolicyState?(): ProjectPolicyState;
 	reconnect?(): Promise<RuntimeStatus>;
 	reloadPluginUi?(options?: { clearConsole?: boolean }): Promise<{
 		status: "reloaded";

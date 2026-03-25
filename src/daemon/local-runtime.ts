@@ -5,6 +5,7 @@ import type { IFigmaConnector } from "../core/figma-connector.js";
 import { DEFAULT_WS_PORT, HEARTBEAT_INTERVAL_MS, advertisePort, cleanupOrphanedProcesses, cleanupStalePortFiles, getPortRange, refreshPortAdvertisement, registerPortCleanup, unadvertisePort } from "../core/port-discovery.js";
 import { FigmaWebSocketServer } from "../core/websocket-server.js";
 import { WebSocketConnector } from "../core/websocket-connector.js";
+import { loadProjectPolicy, summarizeProjectPolicyState, type ProjectPolicyState, type LoadedProjectPolicy } from "./project-policy.js";
 import type {
 	FigmaRuntime,
 	RuntimeConnectedFile,
@@ -19,6 +20,7 @@ const logger = createChildLogger({ component: "daemon-runtime" });
 export interface LocalDaemonRuntimeOptions {
 	wsHost?: string;
 	wsPort?: number;
+	cwd?: string;
 }
 
 export class LocalDaemonRuntime implements FigmaRuntime {
@@ -29,9 +31,13 @@ export class LocalDaemonRuntime implements FigmaRuntime {
 	private figmaAPI: FigmaAPI | null = null;
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	private actualWsPort: number | null = null;
+	private readonly projectPolicyState: ProjectPolicyState;
 
 	constructor(options: LocalDaemonRuntimeOptions = {}) {
 		this.options = options;
+		this.projectPolicyState = loadProjectPolicy({
+			cwd: this.options.cwd || process.cwd(),
+		});
 	}
 
 	async start(): Promise<void> {
@@ -115,6 +121,7 @@ export class LocalDaemonRuntime implements FigmaRuntime {
 			pluginConnected: !!this.wsServer?.isClientConnected(),
 			restAuthenticated: !!restToken,
 			selectionCount: selection?.count,
+			projectPolicy: summarizeProjectPolicyState(this.projectPolicyState),
 			warnings: fileInfo ? [] : ["No active Figma file connected via Desktop Bridge plugin."],
 		};
 	}
@@ -234,6 +241,14 @@ export class LocalDaemonRuntime implements FigmaRuntime {
 			oldestTimestamp: status.oldestTimestamp,
 			newestTimestamp: status.newestTimestamp,
 		};
+	}
+
+	getProjectPolicy(): LoadedProjectPolicy | null {
+		return this.projectPolicyState.policy;
+	}
+
+	getProjectPolicyState(): ProjectPolicyState {
+		return this.projectPolicyState;
 	}
 
 	async reconnect(): Promise<RuntimeStatus> {

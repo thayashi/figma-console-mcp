@@ -4,6 +4,7 @@ import { extractFigmaUrlInfo, formatComponentData, formatVariables } from "../..
 import { EnrichmentService } from "../../core/enrichment/index.js";
 import { createChildLogger } from "../../core/logger.js";
 import type { EnrichmentOptions } from "../../core/types/enriched.js";
+import { resolveLintRuleRequest } from "../../core/mockup-lint-preset.js";
 import {
 	buildAnatomyTree,
 	chunkMarkdownByHeaders,
@@ -108,6 +109,8 @@ const parityInputSchema = z.object({
 });
 
 const getStatusInputSchema = z.object({});
+
+const getProjectPolicyInputSchema = z.object({});
 
 const getSelectionInputSchema = z.object({});
 
@@ -256,6 +259,7 @@ const captureScreenshotInputSchema = z.object({
 
 const lintDesignInputSchema = z.object({
 	nodeId: z.string().optional(),
+	preset: z.enum(["mockup-quality"]).optional(),
 	rules: z.array(z.string()).optional(),
 	maxDepth: z.number().optional(),
 	maxFindings: z.number().optional(),
@@ -2140,6 +2144,51 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		},
 	};
 
+	const getProjectPolicyTool: ToolDefinition<any, any> = {
+		name: "figma_get_project_policy",
+		summary: "Read the loaded project mockup policy for the current workspace.",
+		description:
+			"Registry-backed runtime policy tool for HTTP/CLI. Returns the daemon-loaded project mockup policy, its source path, workspace root, checked search paths, and validation preferences for future mockup generation.",
+		tags: ["figma", "runtime", "policy", "mockups"],
+		discoveryGroup: "runtime",
+		inputSchema: getProjectPolicyInputSchema,
+		capabilities: {
+			requiresPlugin: false,
+			requiresRestToken: false,
+			supportsCli: true,
+			supportsHttp: true,
+			supportsMcp: true,
+			responseShape: "medium",
+			sideEffects: "none",
+		},
+		examples: [
+			{
+				title: "Read the current project mockup policy",
+				input: {},
+			},
+		],
+		relatedTools: ["figma_get_status", "figma_get_design_system_summary"],
+		handler: async ({ runtime }) => {
+			const state = runtime.getProjectPolicyState?.();
+			const loaded = runtime.getProjectPolicy?.() || null;
+			if (!state) {
+				throw new Error("Runtime does not support project policy loading.");
+			}
+
+			return {
+				status: state.status,
+				cwd: state.cwd,
+				checkedPaths: state.checkedPaths,
+				sourcePath: loaded?.sourcePath,
+				workspaceRoot: loaded?.workspaceRoot,
+				projectName: loaded?.policy.projectName,
+				policy: loaded?.policy || null,
+				error: state.error,
+				timestamp: Date.now(),
+			};
+		},
+	};
+
 	const getSelectionTool: ToolDefinition<GetSelectionInput, any> = {
 		name: "figma_get_selection",
 		summary: "Get the current selection in the active connected Figma file.",
@@ -2817,7 +2866,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		name: "figma_lint_design",
 		summary: "Run accessibility and design quality checks.",
 		description:
-			"Registry-backed analysis tool for HTTP/CLI. Runs design linting through the Desktop Bridge plugin and returns categorized findings for WCAG, design-system, and layout issues.",
+			"Registry-backed analysis tool for HTTP/CLI. Runs design linting through the Desktop Bridge plugin and returns categorized findings for WCAG, design-system, and layout issues. Supports the mockup-quality preset for screen, form, table, and dashboard review loops.",
 		tags: ["figma", "analysis", "lint", "accessibility"],
 		discoveryGroup: "analysis",
 		inputSchema: lintDesignInputSchema,
@@ -2839,14 +2888,28 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 					maxFindings: 100,
 				},
 			},
+			{
+				title: "Run the mockup-quality preset on a node",
+				input: {
+					nodeId: "123:456",
+					preset: "mockup-quality",
+					maxDepth: 10,
+					maxFindings: 50,
+				},
+			},
 		],
 		relatedTools: ["figma_capture_screenshot", "figma_check_design_parity"],
 		commonErrors: pluginRequiredErrors as any,
 		handler: async ({ runtime }, input: LintDesignInput) => {
+			const lintRequest = resolveLintRuleRequest({
+				rules: input.rules,
+				preset: input.preset,
+				policy: runtime.getProjectPolicy?.() || null,
+			});
 			const connector = await runtime.getDesktopConnector();
 			const result = await connector.lintDesign(
 				input.nodeId,
-				input.rules || ["all"],
+				lintRequest.resolvedRules,
 				input.maxDepth || 10,
 				input.maxFindings || 100,
 			);
@@ -2855,7 +2918,18 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 				throw new Error(result.error || "Lint failed");
 			}
 
-			return result.data || result;
+			return {
+				...(result.data || result),
+				lintRequest: {
+					preset: input.preset || null,
+					appliedPresets: lintRequest.appliedPresets,
+					resolvedRules: lintRequest.resolvedRules,
+					requestSource: lintRequest.requestSource,
+					maxDepth: input.maxDepth || 10,
+					maxFindings: input.maxFindings || 100,
+				},
+				timestamp: Date.now(),
+			};
 		},
 	};
 
@@ -2874,6 +2948,7 @@ export function createLocalReadToolDefinitions(): ToolDefinition<any, any>[] {
 		generateComponentDocTool,
 		parityTool,
 		getStatusTool,
+		getProjectPolicyTool,
 		getSelectionTool,
 		listOpenFilesTool,
 		getCommentsTool,

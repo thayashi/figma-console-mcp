@@ -16,6 +16,11 @@ interface ToolInvokeRequestBody {
 	options?: ToolInvokeOptions;
 }
 
+const convenienceAliasToolByPath: Record<string, string> = {
+	"/v1/execute": "figma_execute",
+	"/v1/screenshot": "figma_capture_screenshot",
+};
+
 export function createHttpHandler(options: HttpServerOptions) {
 	const { runtime, registry } = options;
 
@@ -42,6 +47,20 @@ export function createHttpHandler(options: HttpServerOptions) {
 
 		if (method === "GET" && url.pathname === "/v1/openapi.json") {
 			return writeJson(res, 200, buildOpenApiDocument(registry));
+		}
+
+		if (method === "POST" && url.pathname in convenienceAliasToolByPath) {
+			const toolName = convenienceAliasToolByPath[url.pathname];
+			const payload = normalizeAliasRequestBody(await readJsonBody(req));
+			const ctx = createToolContext(runtime, "http", randomUUID(), false);
+			const result = await registry.invoke(
+				toolName,
+				ctx,
+				payload.input,
+				payload.options,
+			);
+
+			return writeJson(res, result.ok ? 200 : 400, result);
 		}
 
 		if (method === "GET" && url.pathname.startsWith("/v1/tools/")) {
@@ -127,6 +146,26 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 	return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+function normalizeAliasRequestBody(payload: unknown): ToolInvokeRequestBody {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+		return { input: payload };
+	}
+
+	const body = payload as Record<string, unknown>;
+	const options = body.options as ToolInvokeOptions | undefined;
+	if ("input" in body || "options" in body) {
+		return {
+			input: body.input,
+			options,
+		};
+	}
+
+	return {
+		input: body,
+		options,
+	};
+}
+
 function writeJson(res: ServerResponse, statusCode: number, data: unknown): void {
 	res.statusCode = statusCode;
 	res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -153,6 +192,18 @@ function buildOpenApiDocument(registry: ToolRegistry): unknown {
 		"/v1/help": {
 			get: {
 				summary: "Agent-oriented discovery and usage guide",
+			},
+		},
+		"/v1/execute": {
+			post: {
+				summary: "Convenience alias for figma_execute",
+				description: "Accepts either a direct figma_execute input object or the standard { input, options } envelope.",
+			},
+		},
+		"/v1/screenshot": {
+			post: {
+				summary: "Convenience alias for figma_capture_screenshot",
+				description: "Accepts either a direct screenshot input object or the standard { input, options } envelope.",
 			},
 		},
 	};
@@ -184,20 +235,25 @@ export function buildHelpDocument(registry: ToolRegistry): unknown {
 	const tools = registry.describeAll();
 	const toolNames = tools.map((tool) => tool.name);
 	const groupedTools = buildHelpGroups(tools);
+	const hasProjectPolicyTool = tools.some((tool) => tool.name === "figma_get_project_policy");
 
 	return {
 		service: "Figma Console Local API",
 		version: "0.1.0",
-		audience: "Agents and scripts exploring daemon-first Figma workflows over localhost HTTP.",
+		audience: "Agents and scripts exploring daemon-first Figma control surfaces over localhost HTTP.",
 		discoveryFlow: [
 			"Call GET /v1/status first when you need to know whether a Desktop Bridge connection is active.",
 			"Call GET /v1/tools to browse the tool surface grouped by workflow area.",
 			"Call GET /v1/tools/:name before invoking a tool so you can inspect schema, examples, transport support, and prerequisites.",
 			"Call POST /v1/tools/:name with an input object only after you have narrowed the file, node, or component target.",
+			"For quick plugin execution loops, POST /v1/execute and POST /v1/screenshot are convenience wrappers over registry-backed tools.",
 		],
 		recommendations: {
 			startingPoints: [
 				"For runtime awareness, start with figma_get_status, figma_get_selection, or figma_list_open_files.",
+				hasProjectPolicyTool
+					? "For project-level configuration discovery, start with figma_get_project_policy."
+					: "For project-level configuration discovery, inspect the active workspace before invoking write tools.",
 				"For design-system discovery, start with figma_get_design_system_summary, figma_get_variables, or figma_search_components.",
 				"For document inspection, start with figma_get_file_data before node-targeted writes.",
 			],
@@ -218,24 +274,16 @@ export function buildHelpDocument(registry: ToolRegistry): unknown {
 				"If a high-level tool is insufficient, use figma_execute as the lowest-level Plugin API escape hatch.",
 			],
 		},
-		workflows: [
+		convenienceEndpoints: [
 			{
-				name: "Discover Then Edit",
-				steps: [
-					"Check daemon/runtime state.",
-					"Find the target file, node, component, or variable with read tools.",
-					"Inspect the specific tool schema.",
-					"Invoke one write tool with focused input.",
-					"Validate with screenshot, logs, or parity/lint tools.",
-				],
+				path: "/v1/execute",
+				wraps: "figma_execute",
+				bodyShape: "direct input object or { input, options }",
 			},
 			{
-				name: "Cross-File Library Access",
-				steps: [
-					"Use a REST-authenticated tool with a library file key or URL.",
-					"Search or inspect the library component.",
-					"Use a concrete component or variant key for instantiation.",
-				],
+				path: "/v1/screenshot",
+				wraps: "figma_capture_screenshot",
+				bodyShape: "direct input object or { input, options }",
 			},
 		],
 		groupedTools,
@@ -244,6 +292,12 @@ export function buildHelpDocument(registry: ToolRegistry): unknown {
 				question: "Need current plugin state or active selection?",
 				use: ["figma_get_status", "figma_get_selection", "figma_list_open_files"],
 			},
+			...(hasProjectPolicyTool
+				? [{
+					question: "Need project-level mockup policy or validation expectations?",
+					use: ["figma_get_project_policy"],
+				}]
+				: []),
 			{
 				question: "Need component, token, or library discovery?",
 				use: ["figma_get_design_system_summary", "figma_search_components", "figma_get_component_details"],
@@ -280,6 +334,23 @@ export function buildHelpDocument(registry: ToolRegistry): unknown {
 						query: "Button",
 						limit: 10,
 					},
+				},
+			},
+			executeAlias: {
+				method: "POST",
+				path: "/v1/execute",
+				body: {
+					code: "return { ok: true };",
+					timeout: 5000,
+				},
+			},
+			screenshotAlias: {
+				method: "POST",
+				path: "/v1/screenshot",
+				body: {
+					nodeId: "123:456",
+					format: "PNG",
+					scale: 2,
 				},
 			},
 		},
