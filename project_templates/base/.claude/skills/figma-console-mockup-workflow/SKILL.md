@@ -9,8 +9,10 @@ disable-model-invocation: false
 Use Figma as an execution surface for product mockups.
 
 Transport policy:
-- Prefer `figma-console-mcp` MCP tools when available.
-- If MCP is unavailable in this environment, fall back to the `figma-console` CLI.
+- Prefer the local `figma-console` CLI for discovery and invocation.
+- Use localhost HTTP only when CLI output or invocation is insufficient.
+- Use official Figma MCP tools only as fallback when the user explicitly asks for MCP or the local daemon/CLI path is unavailable.
+- When using the CLI, pass tool input with `--input`, not `--args`.
 
 Core rule:
 - This workflow does not invent design policy on its own.
@@ -24,16 +26,29 @@ Required workflow:
 5. Validate the result visually, then iterate at least once if structure or visual quality is weak.
 
 Discovery sequence:
-- MCP path:
+- CLI first:
+  - `figma-console daemon status`
+  - `figma-console tools list`
+  - `figma-console tools show <tool>`
+  - `figma-console invoke <tool> --input '{...}'`
+- Localhost HTTP second:
+  - `GET /v1/status`
+  - `GET /v1/tools`
+  - `GET /v1/tools/:name`
+  - `POST /v1/tools/:name`
+- MCP fallback:
   - `figma_get_status`
   - `figma_get_selection`
   - `figma_search_components`
   - `figma_get_design_system_kit` or `figma_get_variables` / `figma_get_styles` when needed
-- CLI fallback:
-  - `figma-console daemon status`
-  - `figma-console tools list`
-  - `figma-console tools show figma_search_components`
-  - `figma-console invoke figma_search_components --input '{"query":"Button"}'`
+
+Selection-targeted edit loop:
+1. Check daemon health with `figma-console daemon status`.
+2. Read the current selection with `figma-console invoke figma_get_selection --input '{}'`.
+3. Capture the selected node once with `figma-console invoke figma_capture_screenshot --input '{"nodeId":"<selected-id>","format":"PNG","scale":2}'` when visible content matters.
+4. If the task is a content replacement inside the selected frame, prefer one targeted inspection pass over repeated exploratory writes.
+5. If structured tools cannot reach the needed nested text nodes cleanly, use one focused `figma_execute` read pass to enumerate the relevant descendants, then one focused `figma_execute` write pass to apply the replacements.
+6. Capture one final screenshot after the batched edit instead of re-running the same write loop repeatedly.
 
 Creation strategy:
 - First choice: `figma_instantiate_component`
@@ -49,6 +64,7 @@ Creation strategy:
   - `figma_arrange_component_set` when organizing variants
 - Use `figma_execute` only if the structured tools cannot express the required change cleanly.
 - Treat `figma_execute` as a low-level escape hatch, not the default editing path.
+- Do not bounce between CLI, HTTP, and MCP for the same edit unless one path has actually failed and the failure explains why a fallback is necessary.
 
 Design system rules:
 - Reuse published components whenever a suitable component exists.

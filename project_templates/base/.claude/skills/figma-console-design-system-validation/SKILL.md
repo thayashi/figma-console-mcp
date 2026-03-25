@@ -9,8 +9,10 @@ disable-model-invocation: false
 Use Figma as the inspection and validation target for design system work.
 
 Transport policy:
-- Prefer `figma-console-mcp` MCP tools when available.
-- If MCP is unavailable in this environment, fall back to the `figma-console` CLI.
+- Prefer the local `figma-console` CLI for discovery and invocation.
+- Use localhost HTTP only when CLI output or invocation is insufficient.
+- Use official Figma MCP tools only as fallback when the user explicitly asks for MCP or the local daemon/CLI path is unavailable.
+- When using the CLI, pass tool input with `--input`, not `--args`.
 
 Core rule:
 - This workflow provides the validation procedure, not the design rules.
@@ -24,19 +26,29 @@ Required workflow:
 5. Report concrete findings, not vague quality judgments.
 
 Discovery sequence:
-- MCP path:
+- CLI first:
+  - `figma-console daemon status`
+  - `figma-console tools list`
+  - `figma-console tools show figma_check_design_parity`
+  - `figma-console tools show figma_lint_design`
+  - `figma-console invoke <tool> --input '{...}'`
+- Localhost HTTP second:
+  - `GET /v1/status`
+  - `GET /v1/tools`
+  - `GET /v1/tools/:name`
+  - `POST /v1/tools/:name`
+- MCP fallback:
   - `figma_get_status`
   - `figma_search_components` or `figma_get_component_details`
   - `figma_get_design_system_kit`, `figma_get_variables`, and `figma_get_styles` as needed
-- CLI fallback:
-  - `figma-console daemon status`
-  - `figma-console tools show figma_check_design_parity`
-  - `figma-console tools show figma_lint_design`
 
 Primary validation tools:
 - `figma_lint_design`
 - `figma_capture_screenshot`
 - `figma_check_design_parity`
+
+Routing rule:
+- Do not switch between CLI, HTTP, and MCP for the same validation pass unless the current path failed and the failure justifies the fallback.
 
 Reporting rules:
 - Report findings in priority order.

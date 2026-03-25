@@ -10,6 +10,11 @@ Use these rules when creating or editing mockups through `figma-console`.
 
 These are intentionally generic. Project-specific visual direction belongs in `AGENTS.md`, `figma-console.project.json`, or additional local skills.
 
+Routing rule:
+- Prefer the local `figma-console` CLI first.
+- Use localhost HTTP second.
+- Use official Figma MCP tools only as fallback when the local daemon path is unavailable or the user explicitly asks for MCP.
+
 ## Core Rules
 
 1. Use Frames, not Groups.
@@ -34,6 +39,7 @@ These are intentionally generic. Project-specific visual direction belongs in `A
   - `figma_resize_node`
 - Use `figma_execute` only when the higher-level tools cannot express the required structure cleanly.
 - Treat `figma_execute` as a low-level escape hatch, not as the default construction tool.
+- Do not re-run the same exploratory edit loop across multiple transports unless one path has already failed for a concrete reason.
 
 ## Validation Guidance
 

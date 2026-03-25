@@ -8,6 +8,11 @@ disable-model-invocation: false
 
 Use this skill when the primary goal is to connect design components to code.
 
+Transport rule:
+- Prefer the local `figma-console` CLI first.
+- Use localhost HTTP second.
+- Use official Figma MCP tools only as fallback.
+
 Recommended local skills:
 
 - `figma-console-design-system-validation`

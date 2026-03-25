@@ -8,6 +8,11 @@ disable-model-invocation: false
 
 Use this skill with the base Figma Console skills when building or updating screens in Figma.
 
+Transport rule:
+- Prefer the local `figma-console` CLI first.
+- Use localhost HTTP second.
+- Use official Figma MCP tools only as fallback.
+
 Recommended local skills:
 
 - `figma-console-mockup-workflow`
@@ -25,3 +30,4 @@ Workflow emphasis:
 2. Find reusable design system components before drawing primitives.
 3. Build screens incrementally.
 4. Review with screenshots before completion.
+5. For selected-frame edits such as table row replacements, inspect once, apply one batched update, then validate once instead of repeatedly re-running the same exploratory loop.

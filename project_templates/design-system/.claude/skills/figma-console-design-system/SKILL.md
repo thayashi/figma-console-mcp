@@ -8,6 +8,11 @@ disable-model-invocation: false
 
 Use this skill with the base Figma Console skills when creating or maintaining a Figma design system.
 
+Transport rule:
+- Prefer the local `figma-console` CLI first.
+- Use localhost HTTP second.
+- Use official Figma MCP tools only as fallback.
+
 Recommended local skills:
 
 - `figma-console-design-system-validation`
