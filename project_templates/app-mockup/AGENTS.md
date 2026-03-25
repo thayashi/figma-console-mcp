@@ -5,6 +5,8 @@ This preset is intended to be merged into the base template for app or screen mo
 ## Focus
 
 - Build product screens and flows in Figma using the daemon-first control surface.
+- Use the local `figma-console` CLI first for discovery and invocation.
+- Use localhost HTTP second, and official Figma MCP only as fallback.
 - Prefer reusable components, variables, and styles over ad hoc primitives.
 - Use mockup-oriented workflow skills under `.claude/skills/`.
 

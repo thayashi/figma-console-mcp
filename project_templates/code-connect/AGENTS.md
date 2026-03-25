@@ -5,6 +5,8 @@ This preset is intended to be merged into the base template for Code Connect wor
 ## Focus
 
 - Map published Figma components to code components.
+- Use the local `figma-console` CLI first for discovery and invocation.
+- Use localhost HTTP second, and official Figma MCP only as fallback.
 - Keep Code Connect mappings aligned with the real codebase.
 - Prefer precise component matching over broad or speculative mapping.
 

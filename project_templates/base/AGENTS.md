@@ -6,22 +6,41 @@ This file is the source of truth for project instructions, research context, and
 
 - Start the local Figma Console daemon before beginning write-heavy work.
 - Open the Figma Desktop Bridge plugin in the target file and confirm the daemon and plugin are connected.
-- Treat the daemon, CLI, HTTP API, and MCP server as the Figma control surface.
+- Treat the local `figma-console` CLI as the default Figma control surface for this project.
+- Treat localhost HTTP as the secondary path when CLI output or invocation is insufficient.
+- Treat official Figma MCP tools as fallback-only when the user explicitly asks for MCP or the local daemon/CLI path is unavailable.
 - Treat `.claude/skills/` as the workflow layer that decides how to combine those tools.
 
 ## Recommended Startup Checks
 
-Before editing Figma, confirm runtime state with one of:
+Before editing Figma, confirm runtime state in this order:
 
-- `figma_get_status`
 - `figma-console daemon status`
 - `figma-console tools list`
+- `figma-console tools show <tool>`
+- `GET /v1/status`
+- `GET /v1/tools`
+- `GET /v1/tools/:name`
+- `figma_get_status` only when the user explicitly wants MCP or the local daemon path is unavailable
 
 Use the control surface to discover schema before invoking unfamiliar tools:
 
-- `figma-console tools show <tool>`
-- `GET /v1/tools/:name`
-- the MCP tool descriptor in your client
+- CLI first
+- localhost HTTP second
+- MCP tool descriptors only as fallback
+
+## Tool Routing Rules
+
+For any Figma task in this project, use this priority order:
+
+1. `figma-console daemon status`
+2. `figma-console tools list`
+3. `figma-console tools show <tool>`
+4. `figma-console invoke <tool> ...`
+5. localhost HTTP equivalents only when CLI is insufficient
+6. official Figma MCP tools only if the user explicitly asks for MCP, or the local daemon/CLI path is unavailable
+
+Do not start with official Figma MCP tools when an equivalent local CLI or localhost HTTP path exists.
 
 ## Instruction Hierarchy
 

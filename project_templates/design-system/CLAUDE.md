@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file is an alias only. Do not duplicate project instructions here.
+For Figma tasks in this project, prefer the local `figma-console` CLI and localhost HTTP. Use official Figma MCP tools only as fallback.
 
 See [AGENTS.md](AGENTS.md) for all project instructions, research context, and analysis workflow.
 

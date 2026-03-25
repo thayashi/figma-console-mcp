@@ -5,6 +5,8 @@ This preset is intended to be merged into the base template for design-system cr
 ## Focus
 
 - Build or validate tokens, variable collections, component structure, and library conventions in Figma.
+- Use the local `figma-console` CLI first for discovery and invocation.
+- Use localhost HTTP second, and official Figma MCP only as fallback.
 - Keep design-system creation incremental and reviewable.
 - Treat token and component architecture as a multi-step workflow rather than a one-shot script.
 
