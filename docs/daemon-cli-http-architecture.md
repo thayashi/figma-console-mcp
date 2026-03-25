@@ -238,14 +238,14 @@ CLI should primarily act as a client to the local daemon.
 
 - `figma-console daemon start`
 - `figma-console daemon status`
-- `figma-console tools list --json`
-- `figma-console tools show <tool> --json`
+- `figma-console tools list`
+- `figma-console tools show <tool>`
 - `figma-console invoke <tool> --input @payload.json`
-- `figma-console help <topic> --json`
+- `figma-console help <topic>`
 
 ### Agent-Friendly Requirements
 
-- all discovery commands support `--json`
+- discovery commands emit structured output by default
 - stable field names
 - non-zero exit codes on failure
 - `stderr` reserved for diagnostics

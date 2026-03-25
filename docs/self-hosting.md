@@ -5,7 +5,9 @@ description: "Deploy your own instance of Figma Console MCP on Cloudflare Worker
 
 # Self-Hosting Guide
 
-Deploy your own instance of Figma Console MCP on Cloudflare Workers.
+Deploy your own remote instance of Figma Console MCP on Cloudflare Workers.
+
+This guide covers self-hosting the remote/cloud path. Local daemon usage is separate and runs on your own machine through the local runtime, CLI, localhost HTTP, and MCP adapters.
 
 ## Why Self-Host?
 
@@ -17,6 +19,9 @@ Deploy your own instance of Figma Console MCP on Cloudflare Workers.
 - You need enterprise security/compliance
 - You want to modify the code
 - You're processing sensitive design data
+
+**Do not self-host for this reason alone:**
+- You only need local daemon access on one machine. In that case, use the local runtime instead of Cloudflare deployment.
 
 ## Quick Deploy
 
@@ -157,6 +162,10 @@ Update your AI client config to use your instance:
 
 **Important:** Replace `<your-subdomain>` with your actual Cloudflare Workers subdomain.
 
+### Optional: Pair Cloud Clients with Desktop Bridge
+
+If you want remote write access from Claude.ai, v0, Replit, or Lovable, your self-hosted worker still relies on the Desktop Bridge plugin and cloud relay pairing flow. Self-hosting the worker does not replace the local plugin runtime in the target Figma file.
+
 ---
 
 ## Custom Domain (Optional)
@@ -196,6 +205,8 @@ Set these via `npx wrangler secret put SECRET_NAME`:
 | `LOG_LEVEL` | No | `info` | Logging verbosity (trace/debug/info/warn/error/fatal) |
 | `BROWSER_TIMEOUT` | No | `120000` | Browser operation timeout (ms) |
 | `MAX_CONSOLE_LOGS` | No | `1000` | Max console logs to buffer |
+
+These secrets apply to the Cloudflare-hosted remote path. They do not configure the local daemon runtime.
 
 ### Setting Secrets
 

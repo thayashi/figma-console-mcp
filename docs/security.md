@@ -12,9 +12,9 @@ Figma Console MCP is designed with security as a priority. The project is **full
 <CardGroup cols={2}>
   <Card title="Local Mode" icon="laptop">
     **Recommended for security-sensitive environments**
-    - Runs entirely on localhost via stdio
-    - Zero external network calls
-    - All communication stays local
+    - Local daemon is the system of record
+    - Tool discovery is available over local CLI, localhost HTTP, and MCP
+    - Plugin-backed runtime traffic stays on localhost
   </Card>
   <Card title="Remote Mode" icon="cloud">
     **For browser-based MCP clients**
@@ -96,11 +96,12 @@ Code runs in Figma's **plugin sandbox**, not your system. It cannot access your 
 
 All network communication is limited to:
 - `api.figma.com` — Figma's official REST API (HTTPS)
-- `localhost:9223–9232` — WebSocket Bridge (Desktop Bridge Plugin communication, port range for multi-instance support)
+- `127.0.0.1` / `localhost` — local daemon HTTP/discovery endpoints and Desktop Bridge runtime connectivity
+- `localhost:9223–9232` — Desktop Bridge runtime communication, port range for multi-instance support
 - `*.workers.dev` — Remote mode only (HTTPS)
 
-### WebSocket Bridge Security
-- **Localhost-only binding** — The WebSocket server binds to `localhost` only, not accessible from external networks
+### Local Runtime Security
+- **Localhost-only binding** — The daemon discovery surface and plugin runtime bind to localhost, not external networks
 - **No authentication required** — Since it's localhost-only, the attack surface is limited to local processes
 - **Request/response correlation** — Each command uses a unique correlation ID to prevent response confusion
 - **Per-file isolation** — Multiple connected Figma files maintain independent state (selection, changes, console logs)
@@ -123,7 +124,7 @@ All network communication is limited to:
 
 <Steps>
   <Step title="Use Local Mode">
-    Deploy with stdio transport for zero external network calls
+    Use the local daemon runtime when you want the smallest exposed network surface
   </Step>
   <Step title="Self-Host (Optional)">
     Run your own Cloudflare Worker instance. See [Self-Hosting Guide](/self-hosting).

@@ -21,9 +21,9 @@ Compared sources:
 ## Snapshot
 
 - legacy unique tool names: 61
-- daemon-first registry tool names: 59
-- exact name overlap: 56
-- legacy names not present in registry: 5
+- daemon-first registry tool names: 60
+- exact name overlap: 57
+- legacy names not present in registry: 4
 - registry-only names: 3
 
 Registry-only names:
@@ -43,7 +43,6 @@ That means functional parity is slightly better than the raw exact-name count su
 
 Legacy tool names that do not currently exist as registry-backed daemon tools:
 
-- `figma_arrange_component_set`
 - `figma_navigate`
 - `figma_pair_plugin`
 - `figma_set_text`
@@ -67,36 +66,35 @@ These are not strong candidates for the runtime/registry layer as currently desi
 - `figma_set_text`
   - effectively covered by `figma_set_text_content`
 
-### Clear Uncovered Gaps
+### Remaining Intentional Omissions
 
-These still look like real daemon-first coverage gaps rather than naming changes:
+These legacy names remain outside the daemon-first registry for explicit scope reasons or because they are covered by renamed tools:
 
-- component/docs workflows:
-- none in this category after adding `figma_get_component` and `figma_generate_component_doc`
-- design-system aggregate workflow:
-- none in this category after adding `figma_get_design_system_kit`
-- plugin/file structure read:
-- none in this category after adding `figma_get_file_for_plugin`
-- component-set organization write:
-  - `figma_arrange_component_set`
+- browser/navigation flow:
+  - `figma_navigate`
+- cloud relay pairing flow:
+  - `figma_pair_plugin`
+- naming-cleanup equivalents:
+  - `figma_take_screenshot` -> `figma_capture_screenshot`
+  - `figma_set_text` -> `figma_set_text_content`
 
 ## Recommended Next Pass
 
 ### Priority 1
 
-Evaluate whether `figma_arrange_component_set` belongs in daemon-first.
+Refresh docs to reflect that `figma_arrange_component_set` is now daemon-first.
 
 Reason:
 
-- it is write-oriented and plugin/runtime-compatible
-- but it is also more specialized than the other current write tools
+- it closes the last real plugin-runtime parity gap from the older local surface
+- remaining exclusions are now intentional boundary decisions rather than uncovered runtime writes
 
 ## Proposed Merge Readiness Interpretation
 
-The daemon-first surface now covers most of the practical runtime/read/write basics, but it is not yet at full parity with the broader historical MCP/local surface.
+The daemon-first surface now covers the practical runtime/read/write surface, and the remaining differences from the historical MCP/local surface are intentional.
 
 Current status is closer to:
 
 - daemon-first foundation: ready
-- branch for further parity cleanup: still active
+- branch for doc and organization cleanup: still active
 - merge to `main`: premature until the remaining gap strategy is explicit

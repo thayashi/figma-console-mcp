@@ -10,6 +10,8 @@
 
 > **🆕 Import Once, Update Never — Plugin Bootloader Architecture:** The Desktop Bridge plugin now dynamically loads its UI from the MCP server on every launch. Import the manifest once from `~/.figma-console-mcp/plugin/manifest.json` and you're done forever — server updates, new tools, and bug fixes are delivered automatically. Plus: orphaned process cleanup, cross-file library components, and built-in housekeeping. [See changelog →](CHANGELOG.md)
 
+> **Daemon-first local access:** The local runtime now exposes the same registry-backed tool surface over `figma-console` CLI, localhost HTTP, and MCP. For local automation, prefer daemon discovery first: `figma-console daemon status`, `figma-console tools list`, `figma-console tools show <tool>`, then `figma-console invoke <tool>`.
+
 ## What is this?
 
 Figma Console MCP connects AI assistants (like Claude) to Figma, enabling:
@@ -22,6 +24,32 @@ Figma Console MCP connects AI assistants (like Claude) to Figma, enabling:
 - **⚡ Real-time monitoring** - Watch logs as plugins execute
 - **☁️ Cloud Write Relay** - Web AI clients (Claude.ai, v0, Replit) can design in Figma via cloud pairing
 - **🔄 Four ways to connect** - Remote SSE, Cloud Mode, NPX, or Local Git
+
+## Local Discovery Flow
+
+For local use, the daemon is the system of record. MCP remains supported, but CLI and localhost HTTP now expose the same registry-backed tool catalog for agent and script discovery.
+
+```bash
+figma-console daemon start
+figma-console daemon status
+figma-console tools list
+figma-console tools show figma_get_status
+figma-console invoke figma_get_status
+```
+
+Local HTTP endpoints mirror the same surface:
+
+- `GET /v1/status`
+- `GET /v1/tools`
+- `GET /v1/tools/:name`
+- `POST /v1/tools/:name`
+
+This is the preferred local exploration order:
+
+1. Check runtime state with `daemon status` or `GET /v1/status`.
+2. Discover the available tool surface with `tools list` or `GET /v1/tools`.
+3. Inspect one tool schema with `tools show <tool>` or `GET /v1/tools/:name`.
+4. Invoke a focused tool input only after confirming the target file, node, component, or variable.
 
 ---
 
@@ -49,9 +77,9 @@ Figma Console MCP connects AI assistants (like Claude) to Figma, enabling:
 | Real-time monitoring (console, selection) | ✅ | ❌ | ❌ |
 | Desktop Bridge plugin | ✅ | ✅ | ❌ |
 | Requires Node.js | Yes | **No** | No |
-| **Total tools available** | **63+** | **43** | **22** |
+| **Tool coverage** | Full local surface | Write-capable remote subset | Read-only subset |
 
-> **Bottom line:** Remote SSE is **read-only** with ~38% of the tools. **Cloud Mode** unlocks write access from web AI clients without Node.js. NPX/Local Git gives the full 63+ tools with real-time monitoring.
+> **Bottom line:** Remote SSE is read-only. Cloud Mode unlocks write access from web AI clients without Node.js. NPX/Local Git gives the full local surface with real-time monitoring.
 
 ---
 
@@ -59,7 +87,7 @@ Figma Console MCP connects AI assistants (like Claude) to Figma, enabling:
 
 **Best for:** Designers who want full AI-assisted design capabilities.
 
-**What you get:** All 63+ tools including design creation, variable management, and component instantiation.
+**What you get:** The full local daemon-backed tool surface including design creation, variable management, and component instantiation.
 
 #### Prerequisites
 
@@ -153,7 +181,7 @@ Create a simple frame with a blue background
 
 **Best for:** Developers who want to modify source code or contribute to the project.
 
-**What you get:** Same 63+ tools as NPX, plus full source code access.
+**What you get:** The same full local daemon-backed surface as NPX, plus full source code access.
 
 #### Quick Setup
 
@@ -194,7 +222,7 @@ Then follow [NPX Steps 3-5](#step-3-connect-to-figma-desktop) above.
 
 **Best for:** Quickly evaluating the tool or read-only design data extraction.
 
-**What you get:** 9 read-only tools — view data, take screenshots, read logs, design-code parity. **Cannot create or modify designs.**
+**What you get:** A read-only remote subset for viewing data, taking screenshots, reading logs, and checking design-code parity. **Cannot create or modify designs.**
 
 #### Claude Desktop (UI Method)
 
@@ -242,7 +270,7 @@ Ready for design creation? Follow the [NPX Setup](#-npx-setup-recommended) guide
 
 **Best for:** Using Claude.ai, v0, Replit, or Lovable to create and modify Figma designs — no Node.js required.
 
-**What you get:** 52 tools including full write access — design creation, variable management, component instantiation, and all REST API tools. Only real-time monitoring (console logs, selection tracking, document changes) requires Local Mode.
+**What you get:** The write-capable remote subset with full write access — design creation, variable management, component instantiation, and REST API reads. Only real-time monitoring (console logs, selection tracking, document changes) requires Local Mode.
 
 #### Prerequisites
 
@@ -299,7 +327,7 @@ AI Client → Cloud MCP Server → Durable Object Relay → Desktop Bridge Plugi
 | Feature | NPX (Recommended) | Cloud Mode | Local Git | Remote SSE |
 |---------|-------------------|------------|-----------|------------|
 | **Setup time** | ~10 minutes | ~5 minutes | ~15 minutes | ~2 minutes |
-| **Total tools** | **63+** | **43** | **63+** | **22** (read-only) |
+| **Tool coverage** | Full local surface | Write-capable remote subset | Full local surface | Read-only subset |
 | **Design creation** | ✅ | ✅ | ✅ | ❌ |
 | **Variable management** | ✅ | ✅ | ✅ | ❌ |
 | **Component instantiation** | ✅ | ✅ | ✅ | ❌ |
@@ -309,11 +337,11 @@ AI Client → Cloud MCP Server → Durable Object Relay → Desktop Bridge Plugi
 | **Console logs** | ✅ (zero latency) | ❌ | ✅ (zero latency) | ✅ |
 | **Read design data** | ✅ | ✅ | ✅ | ✅ |
 | **Requires Node.js** | Yes | **No** | Yes | No |
-| **Authentication** | PAT (manual) | OAuth (automatic) | PAT (manual) | OAuth (automatic) |
+| **Authentication** | PAT (manual) | PAT + pairing code | PAT (manual) | OAuth (automatic) |
 | **Automatic updates** | ✅ (`@latest`) | ✅ | Manual (`git pull`) | ✅ |
 | **Source code access** | ❌ | ❌ | ✅ | ❌ |
 
-> **Key insight:** Remote SSE is read-only. Cloud Mode adds write access for web AI clients without Node.js. NPX/Local Git give the full 63+ tools.
+> **Key insight:** Remote SSE is read-only. Cloud Mode adds write access for web AI clients without Node.js. NPX/Local Git give the full local surface.
 
 **📖 [Complete Feature Comparison](docs/mode-comparison.md)**
 
@@ -377,7 +405,7 @@ When you first use design system tools:
 - `figma_reload_plugin` - Reload current page
 
 ### Visual Debugging
-- `figma_take_screenshot` - Capture UI screenshots
+- `figma_capture_screenshot` - Capture node screenshots for validation
 
 ### Design System Extraction
 - `figma_get_design_system_kit` - **Full design system in one call** — tokens, components, styles, visual specs
@@ -595,10 +623,12 @@ The **Figma Desktop Bridge** plugin is the recommended way to connect Figma to t
 
 ### How the Transport Works
 
-- The MCP server communicates via **WebSocket** through the Desktop Bridge plugin
+- The local daemon is the system of record
+- CLI, localhost HTTP, and MCP all use the same registry-backed tool surface
+- Plugin-backed local writes and runtime state still flow through the Desktop Bridge **WebSocket** connection
 - The server tries port 9223 first, then automatically falls back through ports 9224–9232 if needed
 - The plugin scans all ports in the range and connects to every active server it finds
-- All 63+ tools work through the WebSocket transport
+- Plugin-backed local tools are exposed through the daemon, then adapted to CLI, HTTP, and MCP
 
 **Multiple files:** The WebSocket server supports multiple simultaneous plugin connections — one per open Figma file. Each connection is tracked by file key with independent state (selection, document changes, console logs).
 
@@ -734,7 +764,7 @@ The architecture supports adding new apps with minimal boilerplate — each app 
 
 ## 🛤️ Roadmap
 
-**Current Status:** v1.12.0 (Stable) - Production-ready with Cloud Write Relay, Design System Kit, WebSocket-only connectivity, smart multi-file tracking, 63+ tools, Comments API, and MCP Apps
+**Current Status:** Stable branch with Cloud Write Relay, Design System Kit, daemon-first local CLI/HTTP/MCP access, smart multi-file tracking, comments tooling, and MCP Apps
 
 **Recent Releases:**
 - [x] **v1.12.0** - Cloud Write Relay: web AI clients (Claude.ai, v0, Replit, Lovable) can create and modify Figma designs via cloud relay pairing — no Node.js required

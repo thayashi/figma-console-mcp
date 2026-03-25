@@ -1,13 +1,24 @@
 ---
 title: "Tools Reference"
-description: "Complete API reference for all 57+ MCP tools, including parameters, return values, and usage examples."
+description: "Complete reference for the registry-backed Figma tool surface across CLI, localhost HTTP, and MCP."
 ---
 
 # Available Tools - Detailed Documentation
 
 This guide provides detailed documentation for each tool, including when to use them and best practices.
 
-> **Note:** Local Mode (NPX/Git) provides **63+ tools** with full read/write capabilities and real-time monitoring. Remote Mode provides **9 read-only tools** by default, or **(((52 tools)))** (including full write access) when paired with the Desktop Bridge plugin via Cloud Relay. Tools marked "Local" in the table below require Local Mode. Tools marked "Local / Cloud" work in both Local Mode and Cloud Mode (after pairing).
+> **Note:** Local daemon mode exposes the registry-backed tool surface over CLI, localhost HTTP, and MCP. Cloud and remote availability still varies by transport and pairing state. Tools marked "Local" below require the local daemon/runtime. Tools marked "Local / Cloud" work in both local daemon usage and Cloud Mode after pairing.
+
+## Local Discovery Workflow
+
+For local automation, use discovery before invocation:
+
+1. `figma-console daemon status` or `GET /v1/status`
+2. `figma-console tools list` or `GET /v1/tools`
+3. `figma-console tools show <tool>` or `GET /v1/tools/:name`
+4. `figma-console invoke <tool> --input ...` or `POST /v1/tools/:name`
+
+This matches the daemon-first architecture: inspect runtime state, inspect schema, then invoke a focused input object.
 
 ## Quick Reference
 
@@ -19,7 +30,7 @@ This guide provides detailed documentation for each tool, including when to use 
 | **📋 Console** | `figma_get_console_logs` | Retrieve console logs with filters | All |
 | | `figma_watch_console` | Stream logs in real-time | All |
 | | `figma_clear_console` | Clear log buffer | All |
-| **🔍 Debugging** | `figma_take_screenshot` | Capture UI screenshots | All |
+| **🔍 Debugging** | `figma_capture_screenshot` | Capture node screenshots | Local / Cloud |
 | | `figma_reload_plugin` | Reload current page | All |
 | **🎨 Design System** | `figma_get_variables` | Extract design tokens/variables | All |
 | | `figma_get_styles` | Get color, text, effect styles | All |
@@ -62,7 +73,7 @@ This guide provides detailed documentation for each tool, including when to use 
 | | `figma_clone_node` | Clone a node | Local / Cloud |
 | | `figma_delete_node` | Delete a node | Local / Cloud |
 | | `figma_rename_node` | Rename a node | Local / Cloud |
-| | `figma_set_text` | Set text content | Local / Cloud |
+| | `figma_set_text_content` | Set text content | Local / Cloud |
 | | `figma_set_fills` | Set fill colors | Local / Cloud |
 | | `figma_set_strokes` | Set stroke colors | Local / Cloud |
 | | `figma_create_child` | Create child node | Local / Cloud |
@@ -231,32 +242,26 @@ figma_clear_console()
 
 ## 🔍 Debugging Tools
 
-### `figma_take_screenshot`
+### `figma_capture_screenshot`
 
-Capture screenshots of Figma UI.
+Capture a screenshot of the current node or selection for validation.
 
 **Usage:**
 ```javascript
-figma_take_screenshot({
-  target: 'plugin',           // 'plugin', 'full-page', or 'viewport'
-  format: 'png',              // 'png' or 'jpeg'
-  quality: 90,                // JPEG quality 0-100 (default: 90)
-  filename: 'my-screenshot'   // Optional filename
+figma_capture_screenshot({
+  nodeId: "123:456",          // Optional; uses current selection if omitted
+  format: "PNG",              // "PNG", "JPG", or "SVG"
+  scale: 2                    // 0.5 to 4, default 2
 })
 ```
 
 **Parameters:**
-- `target` (optional): What to screenshot
-  - `'plugin'`: Just the plugin UI (default)
-  - `'full-page'`: Entire scrollable page
-  - `'viewport'`: Current visible viewport
-- `format` (optional): Image format (default: 'png')
-- `quality` (optional): JPEG quality 0-100 (default: 90)
-- `filename` (optional): Custom filename
+- `nodeId` (optional): Specific node to capture; falls back to current selection
+- `format` (optional): `"PNG"`, `"JPG"`, or `"SVG"` (default: `"PNG"`)
+- `scale` (optional): Render scale from `0.5` to `4` (default: `2`)
 
 **Returns:**
-- Screenshot image
-- Metadata (dimensions, format, size)
+- Screenshot data and render metadata
 
 ---
 
@@ -567,7 +572,7 @@ figma_get_file_for_plugin({
 **For Debugging:**
 - `figma_get_console_logs` - Retrieve specific logs
 - `figma_watch_console` - Live monitoring
-- `figma_take_screenshot` - Visual debugging
+- `figma_capture_screenshot` - Visual debugging
 - `figma_get_status` - Check connection health
 
 ---
@@ -582,6 +587,8 @@ figma_get_file_for_plugin({
 
 **The Power Tool** - Execute any Figma Plugin API code to create designs, modify elements, or perform complex operations.
 
+Use it as a low-level escape hatch, not as the default path for edits that already have dedicated tools.
+
 **When to Use:**
 - Creating UI components (buttons, cards, modals, notifications)
 - Building frames with auto-layout
@@ -590,6 +597,13 @@ figma_get_file_for_plugin({
 - Applying effects, fills, and strokes
 - Creating pages or organizing layers
 - Any operation that requires the full Figma Plugin API
+
+**Prefer Other Tools First For:**
+- `figma_set_text_content` for text updates
+- `figma_set_fills` / `figma_set_strokes` for color changes
+- `figma_move_node` / `figma_resize_node` for direct node manipulation
+- `figma_instantiate_component` and `figma_set_instance_properties` for component-driven UI
+- `figma_create_child` when you only need to create a simple node under an existing parent
 
 **Usage:**
 ```javascript
@@ -640,6 +654,8 @@ figma_execute({
 3. **Position elements** relative to viewport center for visibility
 4. **Select created elements** so users can see them immediately
 5. **Use try/catch** for error handling in complex operations
+6. **Prefer Figma-idiomatic structure**: Frames over Groups, Auto Layout where appropriate, and minimal absolute positioning
+7. **Use `getNodeByIdAsync` in dynamic-page contexts** instead of synchronous node lookup
 
 **Common Patterns:**
 
@@ -1360,17 +1376,30 @@ figma_rename_node({
 
 ---
 
-### `figma_set_text`
+### `figma_set_text_content`
 
-Set the text content of a text node.
+Set the text content of a text node and optionally update basic font properties.
 
 **Usage:**
 ```javascript
-figma_set_text({
+figma_set_text_content({
   nodeId: "123:456",
-  characters: "Hello World"
+  text: "Hello World",
+  fontSize: 14,
+  fontWeight: 600,
+  fontFamily: "Inter"
 })
 ```
+
+**Parameters:**
+- `nodeId` (required): Text node ID
+- `text` (required): New text content
+- `fontSize` (optional): Font size to apply
+- `fontWeight` (optional): Font weight to apply
+- `fontFamily` (optional): Font family to apply
+
+**Returns:**
+- Updated node data
 
 ---
 

@@ -7,7 +7,7 @@ description: "Deep dive into Figma Console MCP's architecture, deployment modes,
 
 ## Overview
 
-Figma Console MCP provides AI assistants with real-time access to Figma for debugging, design system extraction, and design creation. The server supports two deployment modes with different capabilities.
+Figma Console MCP provides AI assistants with real-time access to Figma for debugging, design system extraction, and design creation. The system supports remote and local deployment paths, with the local path now centered on a daemon-first runtime.
 
 ## Deployment Modes
 
@@ -57,17 +57,22 @@ flowchart TB
 
 ---
 
-### Local Mode (Desktop Bridge)
+### Local Mode (Daemon-First Desktop Bridge)
 
 **Best for:** Plugin debugging, design creation, variable management, full capabilities
 
 ```mermaid
 flowchart TB
-    AI[AI Assistant]
-    AI -->|stdio| SERVER[Local MCP Server]
+    CLI[CLI]
+    HTTP[Localhost HTTP]
+    MCP[MCP Client]
+    CLI --> DAEMON[Local Daemon Runtime]
+    HTTP --> DAEMON
+    MCP --> DAEMON
 
-    SERVER --> REST[REST Client]
-    SERVER --> WS[WebSocket Server]
+    DAEMON --> REGISTRY[Tool Registry]
+    REGISTRY --> REST[REST Client]
+    REGISTRY --> WS[Desktop Bridge Runtime]
 
     REST -->|HTTPS| API[Figma API]
     WS -->|"WebSocket :9223–9232"| PLUGIN[Desktop Bridge Plugin]
@@ -76,10 +81,10 @@ flowchart TB
 ```
 
 **Transport:**
-- **WebSocket + HTTP** — via Desktop Bridge Plugin on ports 9223–9232. No debug flags needed. Supports real-time selection tracking, document change monitoring, and console capture.
-- The server tries port 9223 first, then automatically falls back through ports 9224–9232 if another instance is already running. Orphaned processes are automatically detected and terminated on startup.
-- The same port serves both WebSocket (plugin communication) and HTTP (bootloader UI delivery at `/plugin/ui` and health checks at `/health`).
-- All 63+ tools work through the WebSocket transport.
+- The local daemon is the system of record.
+- CLI, localhost HTTP, and MCP all adapt the same registry-backed tool surface.
+- Plugin-backed runtime features still flow through the Desktop Bridge connection on ports 9223–9232, with automatic fallback across the port range.
+- The same local runtime also serves bootloader UI delivery and health/discovery endpoints.
 
 **Bootloader Architecture (v1.14.0+):**
 - The Desktop Bridge plugin uses a thin bootloader (`ui.html`, ~120 lines) that Figma caches permanently.
@@ -101,27 +106,27 @@ flowchart TB
 
 ## Component Details
 
-### MCP Server Core (`src/local.ts`)
+### Local Runtime Core
 
-The main server implements the Model Context Protocol with stdio transport for local mode.
+The local runtime is split across daemon, registry, and transport layers rather than a single MCP-first server.
 
 **Key Responsibilities:**
-- Tool registration (63+ tools in Local Mode, 9 in Remote Mode)
-- Request routing and validation
+- Registry-backed tool registration and descriptor normalization
+- Request routing and validation across CLI, HTTP, and MCP
 - Figma API client management
-- Desktop Bridge communication via WebSocket
+- Desktop Bridge runtime communication
 
 **Tool Categories:**
 
 | Category | Tools | Transport |
 |----------|-------|-----------|
-| Navigation | `figma_navigate`, `figma_get_status` | WebSocket |
-| Console | `figma_get_console_logs`, `figma_watch_console`, `figma_clear_console` | WebSocket |
-| Screenshots | `figma_take_screenshot`, `figma_capture_screenshot` | WebSocket |
+| Runtime | `figma_get_status`, `figma_get_selection`, `figma_list_open_files` | CLI / HTTP / MCP |
+| Console | `figma_get_console_logs`, `figma_watch_console`, `figma_clear_console` | CLI / HTTP / MCP |
+| Screenshots | `figma_capture_screenshot`, `figma_get_component_image` | CLI / HTTP / MCP |
 | Design System | `figma_get_variables`, `figma_get_styles`, `figma_get_component` | REST API |
-| Design Creation | `figma_execute`, `figma_arrange_component_set` | WebSocket (Plugin) |
-| Variables | `figma_create_variable`, `figma_update_variable`, etc. | WebSocket (Plugin) |
-| Real-Time | `figma_get_selection`, `figma_get_design_changes` | WebSocket |
+| Design Creation | `figma_execute`, `figma_arrange_component_set` | Plugin-backed via daemon runtime |
+| Variables | `figma_create_variable`, `figma_update_variable`, etc. | Plugin-backed via daemon runtime |
+| Real-Time | `figma_get_selection`, `figma_get_design_changes` | Plugin-backed via daemon runtime |
 
 ---
 
@@ -144,30 +149,32 @@ flowchart TB
 
 **Communication Protocol:**
 
-The MCP server communicates with the Desktop Bridge via WebSocket:
+The local or cloud runtime communicates with the Desktop Bridge via WebSocket:
 
-1. **MCP Server** sends JSON command via WebSocket (ports 9223–9232)
+1. **Runtime** sends JSON command via WebSocket (ports 9223–9232)
 2. **Plugin UI** receives and forwards via `postMessage` to plugin code
 3. **Plugin Code** executes Figma Plugin API calls
 4. **Plugin Code** returns result via `figma.ui.postMessage`
 5. **Plugin UI** sends response back via WebSocket
-6. **MCP Server** receives correlated response
+6. **Runtime** receives correlated response
 
 ---
 
 ### Transport Layer
 
-The MCP server uses a transport abstraction (`IFigmaConnector` interface) with three connector implementations:
+The runtime uses a transport abstraction (`IFigmaConnector` interface) with connector implementations for local plugin access and cloud relay access. On top of that, the daemon exposes three user-facing adapters locally.
 
-| Connector | Class | Mode | Transport |
-|-----------|-------|------|-----------|
-| Local WebSocket | `WebSocketConnector` | Local | `ws://localhost:9223–9232` |
-| Local Desktop | `FigmaDesktopConnector` | Local | CDP fallback |
-| Cloud Relay | `CloudWebSocketConnector` | Remote | Fetch RPC to Durable Object |
+| Layer | Implementation | Mode | Transport |
+|------|----------------|------|-----------|
+| Local adapter | CLI | Local | direct daemon invocation |
+| Local adapter | HTTP server | Local | `http://127.0.0.1:<port>` |
+| Local adapter | MCP registration | Local | stdio adapter over daemon registry |
+| Runtime connector | `WebSocketConnector` | Local | `ws://localhost:9223–9232` |
+| Runtime connector | `CloudWebSocketConnector` | Remote | Fetch RPC to Durable Object |
 
-#### WebSocket Transport (Local)
+#### Daemon-Managed Plugin Transport (Local)
 
-The Desktop Bridge Plugin connects via WebSocket on ports 9223–9232. No special Figma launch flags needed.
+The Desktop Bridge Plugin connects into the local runtime on ports 9223–9232. No special Figma launch flags are needed.
 
 **Features:**
 - Real-time selection tracking (`figma_get_selection`)
@@ -176,9 +183,9 @@ The Desktop Bridge Plugin connects via WebSocket on ports 9223–9232. No specia
 - Plugin-context console capture
 - Instant availability check (no network timeout)
 
-**Communication flow:**
+**Communication flow inside the local runtime:**
 ```
-MCP Server ←WebSocket (ports 9223–9232)→ Plugin UI (ui.html) ←postMessage→ Plugin Code (code.js) ←figma.*→ Figma
+Daemon Runtime ←WebSocket (ports 9223–9232)→ Plugin UI (ui.html) ←postMessage→ Plugin Code (code.js) ←figma.*→ Figma
 ```
 
 #### Cloud Relay Transport (Remote)
@@ -194,13 +201,11 @@ See [Cloud Write Relay](#cloud-write-relay) for full details.
 
 #### Multi-Instance Support (v1.10.0+)
 
-Multiple MCP server processes can run simultaneously (e.g., Claude Desktop Chat tab, Code tab, Cursor, etc.). Each server binds to the first available port in the range 9223–9232. The Desktop Bridge Plugin scans all ports in the range and connects to every active server.
+Multiple local processes can run simultaneously (for example from different MCP clients or local sessions). Each runtime binds to the first available port in the range 9223–9232. The Desktop Bridge Plugin scans all ports in the range and connects to every active runtime.
 
 #### Transport Detection
 
-The MCP server checks if a WebSocket client is connected (instant, under 1ms). If connected, commands route through WebSocket. If no client is connected, setup instructions are returned.
-
-All 63+ tools work through the WebSocket transport.
+The local runtime checks whether a Desktop Bridge connection is active. If connected, plugin-backed tools route through that runtime path. If no client is connected, setup instructions are returned through the invoking transport.
 
 ---
 
@@ -232,7 +237,7 @@ Used for design system extraction and file queries.
 sequenceDiagram
     participant U as User
     participant A as AI
-    participant M as MCP
+    participant M as Local Runtime
     participant B as Bridge
     participant F as Figma
 
@@ -253,7 +258,7 @@ sequenceDiagram
 sequenceDiagram
     participant U as User
     participant A as AI
-    participant M as MCP
+    participant M as Local Runtime
     participant B as Bridge
     participant F as Figma
 
@@ -274,7 +279,7 @@ sequenceDiagram
     participant U as User
     participant P as Plugin
     participant B as Bridge
-    participant M as MCP
+    participant M as Local Runtime
     participant A as AI
 
     U->>P: Run plugin
@@ -324,7 +329,7 @@ Cloud MCP Server (/mcp endpoint on Cloudflare Worker)
 |-----------|------|---------|
 | `PluginRelayDO` | `src/core/cloud-websocket-relay.ts` | Durable Object that brokers WebSocket between cloud server and plugin |
 | `CloudWebSocketConnector` | `src/core/cloud-websocket-connector.ts` | `IFigmaConnector` implementation that routes commands via fetch RPC to the relay DO |
-| `registerWriteTools()` | `src/core/write-tools.ts` | Shared tool registration function used by both local and cloud entry points |
+| Registry catalogs | `src/tools/catalog/*.ts` | Registry-backed local tool definitions shared across daemon transports |
 
 ### Pairing Flow
 
@@ -365,12 +370,12 @@ The `PluginRelayDO` uses Cloudflare Durable Object hibernation-safe patterns to 
 
 ### Tool Registration
 
-`registerWriteTools()` is a shared function that registers all Plugin API write tools (design creation, variable CRUD, component arrangement). It is called from both entry points:
+Registry-backed local tools are defined once, then exposed through the daemon transports. Cloud relay write tooling remains separately registered in the cloud entry path:
 
-- **`src/local.ts`** — Local mode, tools route through the local `WebSocketConnector`
+- **Local daemon path** — tools route through the local runtime and shared registry
 - **`src/index.ts`** — Remote/cloud mode, tools route through `CloudWebSocketConnector` to the relay DO
 
-This ensures tool parity between local and cloud modes. The same set of write tools is available regardless of deployment path.
+This keeps local discovery and invocation transport-neutral while preserving cloud relay support for remote write flows.
 
 ---
 

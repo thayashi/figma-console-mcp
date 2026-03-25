@@ -25,7 +25,7 @@ This article sets the record straight.
   <Card title="Figma Console MCP" icon="terminal">
     **Made by Southleft** — A full design system API. Reads, writes, creates, debugs, and manages your entire Figma file programmatically. Think of it as a two-way door: code and design flow both directions.
 
-    63+ tools. Plugin API + REST API. Open source (MIT).
+    Full local tool surface. Plugin API + REST API. Open source (MIT).
   </Card>
 </Columns>
 
@@ -37,12 +37,12 @@ The biggest architectural difference is *how* each server talks to Figma — and
 
 | | Figma MCP (Official) | Figma Console MCP |
 |---|---|---|
-| **Connection method** | Figma REST API (cloud) | WebSocket Desktop Bridge + REST API |
+| **Connection method** | Figma REST API (cloud) | Desktop Bridge runtime + REST API |
 | **Runs where** | Figma's cloud (`mcp.figma.com`) or Desktop App | Your machine (`npx`) or self-hosted cloud |
 | **Plugin API access** | No | Yes — full `figma.*` API |
-| **Authentication** | OAuth (browser popup) | Personal Access Token |
+| **Authentication** | OAuth (browser popup) | Local: PAT. Cloud write relay: PAT + pairing code. Remote SSE: OAuth |
 | **Source code** | Closed source | Open source (MIT) |
-| **Transport** | Streamable HTTP | stdio (local) or SSE (remote) |
+| **Transport** | Streamable HTTP | daemon-backed local CLI / HTTP / MCP, plus remote SSE/HTTP |
 
 **Why this matters:** The Figma REST API is read-only for design data. You can fetch file structures, component metadata, and export images — but you cannot create a rectangle, change a fill color, or add a variable. The Plugin API can do all of that and more.
 
@@ -136,7 +136,7 @@ Figma Console MCP has **11 dedicated tools** for variable and token management. 
 |---|:---:|:---:|
 | Structured design context for code generation | Yes | Yes |
 | Framework-specific code output (React, Vue, etc.) | Yes (built-in) | Via AI interpretation |
-| Code Connect integration | Yes (52 tools) | No |
+| Code Connect integration | Yes | No |
 | Design system rules generation | Yes | No |
 | Design-code parity analysis | No | Yes |
 | AI-complete component documentation | No | Yes |
@@ -185,9 +185,9 @@ Figma Console MCP has **11 dedicated tools** for variable and token management. 
 
 | Metric | Figma MCP | Console MCP |
 |---|:---:|:---:|
-| **Total tools** | 13 | 57+ |
-| **Read-only tools** | ~10 | ~22 |
-| **Write/create tools** | 3 | 35+ |
+| **Total tools** | 13 | Broad local + remote surface |
+| **Read-only tools** | ~10 | Broad read surface |
+| **Write/create tools** | 3 | Broad write surface |
 | **Variable management tools** | 0 | 11 |
 | **Component management tools** | 0 | 5 |
 | **Node manipulation tools** | 0 | 11 |
@@ -273,7 +273,7 @@ We're not here to compete with Figma. We're here to extend what's possible. The 
 
 <Columns cols={2}>
   <Card title="Set Up Figma Console MCP" icon="rocket" href="/setup">
-    Full 63+ tool access in ~10 minutes. Create, read, and manage your design system with AI.
+    Full local daemon-backed access in ~10 minutes. Create, read, and manage your design system with AI.
   </Card>
   <Card title="Set Up Figma MCP (Official)" icon="figma" href="https://developers.figma.com/docs/figma-mcp-server/">
     Figma's official documentation for their MCP server setup and usage.

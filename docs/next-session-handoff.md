@@ -26,6 +26,13 @@ Important current decision:
 
 - Added daemon-first architecture notes:
   - [docs/daemon-cli-http-architecture.md](./daemon-cli-http-architecture.md)
+- Added mockup quality follow-up docs:
+  - [docs/mockup-quality-improvement-plan.md](/home/toshi/dev/figma-console-mcp/docs/mockup-quality-improvement-plan.md)
+  - [docs/project-policy.md](/home/toshi/dev/figma-console-mcp/docs/project-policy.md)
+  - [docs/mockup-recipes.md](/home/toshi/dev/figma-console-mcp/docs/mockup-recipes.md)
+  - [docs/review-loop.md](/home/toshi/dev/figma-console-mcp/docs/review-loop.md)
+  - [docs/http-convenience-endpoints.md](/home/toshi/dev/figma-console-mcp/docs/http-convenience-endpoints.md)
+  - [docs/mockup-lint-preset.md](/home/toshi/dev/figma-console-mcp/docs/mockup-lint-preset.md)
 
 ### Core daemon / registry / transport scaffolding
 
@@ -56,6 +63,39 @@ Discovery file path:
 - `~/.figma-console-mcp/daemon-http.json`
 
 This is used so CLI commands can find the already-running daemon instead of trying to start local runtime directly.
+
+### Project policy loading
+
+Added project policy loading and runtime exposure:
+
+- [src/daemon/project-policy.ts](/home/toshi/dev/figma-console-mcp/src/daemon/project-policy.ts)
+- [src/daemon/runtime.ts](/home/toshi/dev/figma-console-mcp/src/daemon/runtime.ts)
+- [src/daemon/local-runtime.ts](/home/toshi/dev/figma-console-mcp/src/daemon/local-runtime.ts)
+
+Implemented:
+
+- deterministic workspace search for `figma-console.project.json`
+- alternate search path `.figma-console/project-policy.json`
+- optional override via `FIGMA_PROJECT_POLICY_PATH`
+- runtime status now includes project policy summary
+- registry-backed read tool:
+  - `figma_get_project_policy`
+
+### Mockup-quality support added in this session
+
+Added mockup-quality support files:
+
+- [src/core/mockup-recipes.ts](/home/toshi/dev/figma-console-mcp/src/core/mockup-recipes.ts)
+- [src/core/mockup-lint-preset.ts](/home/toshi/dev/figma-console-mcp/src/core/mockup-lint-preset.ts)
+
+Implemented:
+
+- HTTP convenience aliases:
+  - `POST /v1/execute` -> `figma_execute`
+  - `POST /v1/screenshot` -> `figma_capture_screenshot`
+- `figma_lint_design` support for:
+  - `preset: "mockup-quality"`
+- project policy fallback for lint rules when explicit rules are omitted
 
 ### Daemon lifecycle fixes
 
@@ -183,6 +223,10 @@ Added registry-focused regression tests in:
 - [tests/http-help.test.ts](/home/toshi/dev/figma-console-mcp/tests/http-help.test.ts)
 - [tests/tool-registry.test.ts](/home/toshi/dev/figma-console-mcp/tests/tool-registry.test.ts)
 - [tests/cli-main.test.ts](/home/toshi/dev/figma-console-mcp/tests/cli-main.test.ts)
+- [tests/project-policy.test.ts](/home/toshi/dev/figma-console-mcp/tests/project-policy.test.ts)
+- [tests/mockup-recipes.test.ts](/home/toshi/dev/figma-console-mcp/tests/mockup-recipes.test.ts)
+- [tests/http-aliases.test.ts](/home/toshi/dev/figma-console-mcp/tests/http-aliases.test.ts)
+- [tests/mockup-lint-preset.test.ts](/home/toshi/dev/figma-console-mcp/tests/mockup-lint-preset.test.ts)
 
 Current coverage in that file includes:
 
@@ -241,7 +285,7 @@ Important:
 Verified command:
 
 ```bash
-TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
+TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/mockup-lint-preset.test.ts tests/http-aliases.test.ts tests/mockup-recipes.test.ts tests/project-policy.test.ts tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
 ```
 
 Important:
@@ -266,7 +310,7 @@ Verified:
 - daemon starts successfully
 - WebSocket port fallback works
 - HTTP port fallback works
-- `/v1/help`, `/v1/status`, `/v1/tools`, `/v1/tools/:name`, `POST /v1/tools/:name` all respond
+- `/v1/help`, `/v1/status`, `/v1/tools`, `/v1/tools/:name`, `POST /v1/tools/:name`, `POST /v1/execute`, and `POST /v1/screenshot` all respond
 
 Observed fallback examples during testing:
 
@@ -320,6 +364,8 @@ Implemented routes:
 - `GET /v1/help`
 - `GET /v1/openapi.json`
 - `POST /v1/tools/:name`
+- `POST /v1/execute`
+- `POST /v1/screenshot`
 
 ## Known Limitations
 
@@ -329,31 +375,42 @@ Implemented routes:
 - `figma_navigate` is still intentionally left outside the daemon-first registry surface because it is browser/CDP-oriented rather than runtime/registry-oriented
 - `figma_pair_plugin` is still intentionally outside the localhost daemon-first surface because it is a cloud relay pairing flow
 - `figma_set_text` and `figma_take_screenshot` are effectively covered by `figma_set_text_content` and `figma_capture_screenshot`
-- the main remaining parity question is whether `figma_arrange_component_set` should be moved into the daemon-first write surface
-- no formal project skill/config loading yet
+- `figma_arrange_component_set` is now included in the daemon-first write surface because it is plugin-runtime compatible and transport-neutral
+- no formal project skill/config loading yet, but there is now an initial project policy loader in core
 - some docs still describe the older/local surface more than the daemon-first CLI/HTTP surface
+- after discussion in this session, an architectural boundary was clarified:
+  - CLI/HTTP should stay thin control surfaces for Figma operations
+  - workflow-heavy behavior such as review loops, recipe choice, benchmark orchestration, and mockup workflow policy should primarily live in Skill / agent-template layers
+- implication for next session:
+  - likely keep in core:
+    - project policy loading
+    - generic lint presets
+    - convenience HTTP aliases
+  - move out of core:
+    - recipe selection/orchestration guidance
+    - descriptor/help-level review-loop guidance
+    - workflow-heavy help text beyond transport discovery
 
 ## Most Important Next Steps
 
-### 1. Decide on `figma_arrange_component_set`
+### 1. Refactor workflow-heavy guidance out of core
 
-This is the main remaining uncovered tool from the old MCP/local surface that still plausibly belongs in daemon-first.
+Apply the agreed boundary more consistently:
 
 Highest-value follow-up:
 
-- decide whether its specialized layout/cleanup behavior belongs in the registry-backed write surface
-- if yes, move it into `src/tools/catalog/local-write-tools.ts` and add regression coverage
-- if no, document that it stays legacy-only and why
+- keep CLI/HTTP/help focused on tool discovery and invocation
+- move recipe choice, review-loop guidance, and orchestration into Skill / agent-template assets
 
 ### 2. Refresh daemon-first docs and usage guidance
 
-Current code state is now ahead of older docs/handoff text in a few places.
+After the control-plane cleanup, refresh docs to match the thinner surface.
 
 Highest-value doc cleanup:
 
 - refresh docs that still assume the older local/MCP-first surface
 - document the current discovery groups and CLI/HTTP exploration flow
-- note that tool coverage is now near-parity except for intentionally excluded flows and `figma_arrange_component_set`
+- note that tool coverage is now near-parity with only intentionally excluded flows left outside the daemon-first surface
 
 ### 3. Future phase, not yet implemented
 
@@ -361,6 +418,13 @@ Project-specific skill/config layering:
 
 - keep common daemon/CLI generic
 - make per-project rules, design-system specs, product rules, and parity policies pluggable
+
+### 4. Future documentation cleanup
+
+Once the refactor lands:
+
+- keep API/transport docs focused on schema, discovery, and invocation
+- keep workflow docs under Skill / agent-template assets
 
 ## Practical Commands For Next Session
 
@@ -373,7 +437,7 @@ PATH="$HOME/.volta/bin:$PATH" npm run build:local
 ### Targeted tests
 
 ```bash
-TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
+TMPDIR=/tmp PATH="$HOME/.volta/bin:$PATH" npm test -- --runInBand tests/mockup-lint-preset.test.ts tests/http-aliases.test.ts tests/mockup-recipes.test.ts tests/project-policy.test.ts tests/local-read-tools.test.ts tests/cli-help.test.ts tests/http-help.test.ts tests/tool-registry.test.ts tests/cli-main.test.ts
 ```
 
 ### Start daemon
@@ -412,6 +476,12 @@ PATH="$HOME/.volta/bin:$PATH" node dist/daemon/server.js invoke figma_lint_desig
 curl -s http://127.0.0.1:3850/v1/help
 curl -s http://127.0.0.1:3850/v1/tools
 curl -s http://127.0.0.1:3850/v1/tools/figma_check_design_parity
+curl -s -X POST http://127.0.0.1:3850/v1/execute \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"return { ok: true };"}'
+curl -s -X POST http://127.0.0.1:3850/v1/screenshot \
+  -H 'Content-Type: application/json' \
+  -d '{"nodeId":"123:456","format":"PNG","scale":2}'
 curl -s -X POST http://127.0.0.1:3850/v1/tools/figma_execute \
   -H 'Content-Type: application/json' \
   -d '{"input":{"code":"return { ok: true };"}}'
@@ -435,8 +505,10 @@ Current status:
 - local tool catalogs are split into read and write modules and daemon registration loads both
 - CLI tool grouping, tool details/help guidance, registry descriptor normalization, and CLI error handling have been cleaned up
 - tool coverage gap analysis is documented in `docs/daemon-tool-coverage.md`
+- project policy loading, HTTP convenience aliases, and a mockup-quality lint preset were added in this session
 Next priority:
-- decide whether to bring `figma_arrange_component_set` into daemon-first, then refresh docs
+- refactor workflow-heavy guidance out of core and keep CLI/HTTP thin
 - keep daemon-first architecture direction
+- keep workflow-heavy behavior in Skill / agent-template layers rather than making CLI/HTTP thicker
 - do not merge to main yet
 ```

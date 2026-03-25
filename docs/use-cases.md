@@ -9,7 +9,7 @@ This guide shows real-world scenarios for using Figma Console MCP in your workfl
 
 ## 🐛 Plugin Development & Debugging
 
-### Scenario 1: Simple Plugin Debugging (Local Mode - Easiest!)
+### Scenario 1: Simple Plugin Debugging (Local Daemon)
 
 **Your situation:** You're developing a Figma plugin and want to see console output.
 
@@ -41,7 +41,7 @@ Then run your plugin in Figma Desktop, and say:
 - "What does this stack trace mean?"
 - "Help me fix this error"
 
-**Why this works:** In local mode, the MCP automatically monitors Figma Desktop. No navigation needed!
+**Why this works:** In local daemon mode, the runtime already tracks Desktop Bridge state. No navigation is needed before checking logs.
 
 ---
 
@@ -260,7 +260,7 @@ Then run your plugin in Figma Desktop, and say:
 
 ## ✏️ Design Creation (Local Mode & Cloud Mode)
 
-These scenarios require the Desktop Bridge plugin. In Local Mode, the plugin connects via WebSocket. In Cloud Mode, say "connect to my Figma plugin" first to pair via the cloud relay — then all the same prompts work from web-based AI clients like Claude.ai, v0, Replit, and Lovable.
+These scenarios require the Desktop Bridge plugin. In local mode, the daemon manages the plugin-backed runtime and exposes the same tool surface over CLI, localhost HTTP, and MCP. In Cloud Mode, say "connect to my Figma plugin" first to pair via the cloud relay — then all the same prompts work from web-based AI clients like Claude.ai, v0, Replit, and Lovable.
 
 ### Scenario 11: Create Component Variants with Variables
 
@@ -364,6 +364,15 @@ Then create a basic button component using these variables."
 3. Creates child elements (image, text, button)
 4. Binds padding to design system variables
 5. Converts to component
+
+**Important:** High-quality mockup creation should not stop at visual resemblance. The resulting Figma structure should also be Figma-idiomatic:
+- Prefer Frames over Groups
+- Use Auto Layout for screens, sections, cards, rows, and lists
+- Keep each screen as its own frame when building multi-screen mockups
+- Use padding and spacing properties instead of manual child positioning
+- Prefer structured tools first, and use `figma_execute` only when the higher-level tools are insufficient
+- Validate with `figma_capture_screenshot`, and revise if the result relies too heavily on absolute positioning
+- Validate charts and other data visuals as real UI, not as decorative placeholders
 
 ---
 
@@ -505,7 +514,7 @@ or
 1. AI generates a 6-character pairing code (valid for 5 minutes)
 2. You enter the code in the Desktop Bridge plugin's Cloud Mode section
 3. The plugin connects to the cloud relay — you're paired
-4. All write tools (43 total) are now available through the cloud
+4. The write-capable cloud tool surface is now available through the relay
 
 **Follow-up prompts:**
 - "Create a card component with an image, title, and description"
@@ -725,7 +734,7 @@ or
 ## 📚 More Examples
 
 See also:
-- [Tool Documentation](tools) - Complete API reference for all 63+ tools
+- [Tool Documentation](tools) - Complete API reference for the registry-backed tool surface
 - [Architecture Overview](architecture) - Understanding deployment modes
 - [Example Prompts](../README.md#example-prompts) - Quick prompt examples
 - [Troubleshooting](troubleshooting) - Solutions to common issues

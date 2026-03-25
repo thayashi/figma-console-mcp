@@ -277,7 +277,7 @@ Always use this workflow:
 ```
 1. figma_navigate({ url: 'https://www.figma.com/design/...' })
 2. Wait 2-3 seconds (automatic in figma_navigate)
-3. figma_take_screenshot({ target: 'full-page' })
+3. figma_capture_screenshot({ nodeId: '123:456' })
 ```
 
 Try different targets:
@@ -433,7 +433,7 @@ figma_get_status()
 figma_get_console_logs({ level: 'error' })
 
 # 4. Capture UI state
-figma_take_screenshot({ target: 'plugin' })
+figma_capture_screenshot({ nodeId: '123:456' })
 
 # 5. Make code changes, reload
 figma_reload_plugin({ clearConsole: true })
