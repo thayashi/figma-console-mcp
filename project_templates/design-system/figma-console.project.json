@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "projectName": "Design System Project",
+  "mockups": {
+    "preferredFonts": ["Inter"],
+    "spacingScale": [2, 4, 8, 12, 16, 24, 32, 40, 48, 64],
+    "preferredComponents": {
+      "buttons": ["Button"],
+      "inputs": ["Input"],
+      "navigation": []
+    },
+    "componentLibraries": [],
+    "naming": {
+      "screenPrefix": "Foundations",
+      "layerPattern": "{category}/{component}/{element}",
+      "variantSeparator": "/"
+    },
+    "defaultScreenPresets": [],
+    "notes": [
+      "Create variables before components.",
+      "Use deterministic naming for collections, variables, pages, and components."
+    ]
+  },
+  "validation": {
+    "requireScreenshotReview": true,
+    "requireLint": true,
+    "lintRules": ["all"],
+    "requireParity": true
+  }
+}

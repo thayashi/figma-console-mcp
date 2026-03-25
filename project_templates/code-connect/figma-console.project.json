@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "projectName": "Code Connect Project",
+  "mockups": {
+    "preferredFonts": [],
+    "spacingScale": [],
+    "preferredComponents": {
+      "buttons": [],
+      "inputs": [],
+      "navigation": []
+    },
+    "componentLibraries": [],
+    "naming": {
+      "screenPrefix": "Components",
+      "layerPattern": "{component}/{variant}/{element}",
+      "variantSeparator": "/"
+    },
+    "defaultScreenPresets": [],
+    "notes": [
+      "Prefer published components with stable APIs.",
+      "Keep component naming aligned with code component names where possible."
+    ]
+  },
+  "validation": {
+    "requireScreenshotReview": false,
+    "requireLint": false,
+    "lintRules": [],
+    "requireParity": true
+  }
+}

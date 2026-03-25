@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "projectName": "Project Name",
+  "mockups": {
+    "preferredFonts": ["Inter"],
+    "spacingScale": [4, 8, 12, 16, 24, 32, 48],
+    "preferredComponents": {
+      "buttons": [],
+      "inputs": [],
+      "navigation": []
+    },
+    "componentLibraries": [],
+    "naming": {
+      "screenPrefix": "App",
+      "layerPattern": "{screen}/{section}/{element}",
+      "variantSeparator": "/"
+    },
+    "defaultScreenPresets": [
+      {
+        "name": "Desktop App",
+        "width": 1440,
+        "height": 1024,
+        "layoutMode": "VERTICAL",
+        "padding": 32
+      }
+    ],
+    "notes": [
+      "Prefer existing library components before creating new primitives.",
+      "Use Auto Layout for screen, section, and card containers."
+    ]
+  },
+  "validation": {
+    "requireScreenshotReview": true,
+    "requireLint": true,
+    "lintRules": ["all"],
+    "requireParity": false
+  }
+}

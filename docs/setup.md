@@ -35,9 +35,9 @@ Complete setup instructions for connecting Figma Console MCP to various AI clien
 | Real-time selection/change tracking | ✅ | ❌ | ❌ |
 | Console log streaming | ✅ | ❌ | ❌ |
 | Requires Node.js | Yes | No | No |
-| **Total tools available** | **63+** | **43** | **22** |
+| **Tool coverage** | Full local surface | Write-capable remote subset | Read-only subset |
 
-> **Bottom line:** Remote mode is **read-only** with 22 tools. Cloud Mode adds **write access** ((52 tools)) without Node.js. Local (NPX/Git) has **everything** (63+ tools) including real-time monitoring.
+> **Bottom line:** Remote mode is read-only. Cloud Mode adds write access without Node.js. Local (NPX/Git) remains the full-capability setup, and local access is now daemon-first: the same registry-backed tools are exposed over CLI, localhost HTTP, and MCP.
 
 ---
 
@@ -91,7 +91,9 @@ New to MCP servers, JSON configs, and terminal commands? These designer-friendly
 
 **Best for:** Anyone who wants full AI-assisted design and development capabilities with automatic updates.
 
-**What you get:** All 63+ tools including design creation, variable management, component instantiation, design-to-code workflows, and Desktop Bridge plugin support.
+**What you get:** The full local daemon-backed tool surface including design creation, variable management, component instantiation, design-to-code workflows, and Desktop Bridge plugin support.
+
+**Local access model:** The local daemon is the system of record. Your MCP client can still use it, but you can also inspect and invoke the same tool surface via `figma-console` CLI and localhost HTTP.
 
 ### Prerequisites Checklist
 
@@ -200,6 +202,47 @@ The Desktop Bridge Plugin connects via WebSocket — no special Figma launch fla
 
 **📖 [Desktop Bridge Plugin Documentation](https://github.com/southleft/figma-console-mcp/tree/main/figma-desktop-bridge)**
 
+### Step 4: Verify Local Discovery (~1 min)
+
+Once the local runtime is up, you can discover the same tool surface outside MCP:
+
+```bash
+figma-console daemon status
+figma-console tools list
+figma-console tools show figma_get_status
+figma-console invoke figma_get_status
+```
+
+Local HTTP mirrors this:
+
+- `GET /v1/status`
+- `GET /v1/tools`
+- `GET /v1/tools/:name`
+- `POST /v1/tools/:name`
+
+### Step 4.5: Add Project Templates (Optional but Recommended)
+
+For project-specific workflows, copy one of the starter templates from [`project_templates/`](/home/toshi/dev/figma-console-mcp/project_templates/) into your project root.
+
+Recommended starting point:
+
+- copy `project_templates/base/`
+
+Then optionally merge one or more presets:
+
+- `project_templates/app-mockup/`
+- `project_templates/design-system/`
+- `project_templates/code-connect/`
+
+This gives each project a local:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.claude/skills/`
+- `figma-console.project.json`
+
+Use `project_templates/vendor/figma-official-skills/` as a source for official Figma skills you want to copy into a project's `.claude/skills/`.
+
 #### Multi-Instance / Port Conflicts
 
 Multiple MCP clients (e.g., Claude Desktop Chat + Code tabs, Claude + Cursor) are handled automatically:
@@ -209,12 +252,12 @@ Multiple MCP clients (e.g., Claude Desktop Chat + Code tabs, Claude + Cursor) ar
 - Orphaned server processes from closed tabs are automatically detected and terminated on startup
 - No manual port management or re-importing needed
 
-### Step 4: Restart Your MCP Client (~1 min)
+### Step 5: Restart Your MCP Client (~1 min)
 
 1. **Restart your MCP client** (quit and reopen Claude Code, Cursor, Windsurf, Claude Desktop, etc.)
 2. Verify the MCP server is connected (e.g., in Claude Desktop look for the 🔌 icon showing "figma-console: connected")
 
-### Step 5: Test It! (~2 min)
+### Step 6: Test It! (~2 min)
 
 Try these prompts to verify everything works:
 
@@ -241,7 +284,7 @@ Create a simple frame with a blue background
 
 **Best for:** Users who want more control over when updates happen, or developers who want to contribute to the project.
 
-**What you get:** Same 63+ tools as NPX. Updates are manual — you pull and rebuild when you're ready.
+**What you get:** Same local daemon-first tool surface as NPX. Updates are manual — you pull and rebuild when you're ready.
 
 ### Prerequisites
 
@@ -348,9 +391,9 @@ Then restart Claude Desktop.
 
 **Best for:** Claude.ai, v0, Replit, Lovable, and any MCP-capable web platform that needs to create and modify Figma designs.
 
-**What you get:** 44 tools — full write access (create frames, components, variables, edit designs) plus REST API reads. This is Remote Mode upgraded with the Cloud Write Relay.
+**What you get:** The write-capable remote subset — full write access (create frames, components, variables, edit designs) plus REST API reads. This is Remote Mode upgraded with the Cloud Write Relay.
 
-**What you don't get vs Local:** Real-time selection tracking, document change monitoring, and console log streaming (these require a local WebSocket connection).
+**What you don't get vs Local:** Real-time selection tracking, document change monitoring, and console log streaming (these require the local daemon runtime with an active Desktop Bridge connection).
 
 ### Prerequisites
 
@@ -402,7 +445,7 @@ How to add this depends on your platform:
 
 4. **Done.** Your AI now has full write access to the open Figma file through the cloud relay.
 
-### What You Can Do (44 Tools)
+### What You Can Do
 
 - ✅ Create frames, shapes, and components
 - ✅ Edit existing designs (resize, reposition, restyle)
@@ -433,7 +476,7 @@ How to add this depends on your platform:
 
 **Best for:** Quickly evaluating the tool or read-only design data extraction without any plugin setup.
 
-**What you get:** 9 read-only tools for viewing design data, taking screenshots, reading console logs, and design system extraction.
+**What you get:** A read-only remote subset for viewing design data, taking screenshots, reading console logs, and design system extraction.
 
 > **Want write access?** See [Cloud Mode](#-cloud-mode-web-ai-clients) above — same remote endpoint, plus Desktop Bridge pairing for full design creation.
 

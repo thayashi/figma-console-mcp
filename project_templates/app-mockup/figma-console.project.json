@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "projectName": "App Mockup Project",
+  "mockups": {
+    "preferredFonts": ["Inter", "IBM Plex Sans"],
+    "spacingScale": [4, 8, 12, 16, 24, 32, 48],
+    "preferredComponents": {
+      "buttons": ["Button/Primary", "Button/Secondary"],
+      "inputs": ["Input/Text"],
+      "navigation": ["Topbar/App", "Sidebar/Default"]
+    },
+    "componentLibraries": [],
+    "naming": {
+      "screenPrefix": "App",
+      "layerPattern": "{screen}/{section}/{element}",
+      "variantSeparator": "/"
+    },
+    "defaultScreenPresets": [
+      {
+        "name": "Desktop App",
+        "width": 1440,
+        "height": 1024,
+        "layoutMode": "VERTICAL",
+        "padding": 32
+      }
+    ],
+    "notes": [
+      "Treat each screen as its own top-level frame.",
+      "Prefer Auto Layout for page, section, card, and row containers."
+    ]
+  },
+  "validation": {
+    "requireScreenshotReview": true,
+    "requireLint": true,
+    "lintRules": ["mockup-quality"],
+    "requireParity": false
+  }
+}
